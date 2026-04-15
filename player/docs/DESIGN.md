@@ -43,26 +43,42 @@ interface SegmentQueue {
 const audioContext = new AudioContext();  // ONE, shared across all <audio> elements
 ```
 
-## UI layout (master spec)
+## UI layout (component spec)
 
-```
-┌──────────────────────────────────────────────────────┐
-│  Episode A · 21:04                                   │
-│       [ cover art / segment-color stripe ]           │
-│                                                      │
-│  ──────●─────────────────────────────  04:12 / 21:04 │
-│  [cal][youtube][@AlicesLens][youtube][weather]     │ ← segment track
-│                                                      │
-│     ⟲ 15s       ▶ / ∥       ⏭ skip segment          │
-│                                                      │
-│   Now: @AlicesLens — "indie devs vs. scale"        │
-│   Next: @ofmiles — 32-min on rest ethic              │
-│                                                      │
-│   [⋯ long-press current card → "more like this"]     │
-│                                                      │
-│   [ End session ] ← see Reviewer Concern #5          │
-└──────────────────────────────────────────────────────┘
-```
+**Status of this section:** DRAFT pending user review. The core UX is decided (below); pixel-level layout and gesture details marked `[TBD]` are deliberately left abstract until reviewed.
+
+### Core UX (decided)
+
+Huxe-style card carousel. One card per segment in `running_order`. The current card — whether playing or paused — is always horizontally centered on screen; adjacent cards peek at the edges as affordance for the carousel metaphor.
+
+**Gestures and their effects:**
+
+| Gesture | Effect on playback | `/react` event | `segment_position_sec` captured |
+|---|---|---|---|
+| Tap current (centered) card | Toggle pause/resume on current segment | none (ambient, not a taste signal) | — |
+| Navigate to previous card | Move playhead to start of that segment, begin playing from `start_sec = 0` | `replay` on the segment just left | playhead at moment of navigation, BEFORE mutation |
+| Navigate to next card | Move playhead to start of that segment, begin playing | `skip` on the segment just left | playhead at moment of navigation, BEFORE mutation |
+
+Rationale for the replay/skip mapping: moving backward is an explicit "I want that segment again" — matches the `replay` signal semantic. Moving forward is an explicit "I'm done with this one" — matches the `skip` signal semantic. The old in-segment ⟲-15s button and ⏭-skip button are subsumed by the carousel gestures; the card IS the unit of intent.
+
+### Uncertain / `[TBD]` — user review needed before Day 3 build
+
+These items are called out because the user's direction was deliberately scoped to the core UX above. Do not implement until reviewed.
+
+1. **`[TBD]` How is carousel navigation triggered?** Options: horizontal swipe on touch; left/right arrow keys on keyboard; tap on the peek of an adjacent card; dedicated prev/next buttons. Huxe on mobile uses swipe — demo runs on localhost desktop (screen-shared), so swipe alone isn't enough. Likely answer: tap peek + keyboard arrows, with swipe working if trackpad emits touch events. Confirm with user.
+2. **`[TBD]` In-segment rewind (old ⟲-15s):** is it gone entirely, or retained as a secondary control on the current card for mid-segment rewind? If gone, the only `replay` signal fires at card-boundary navigation. If retained, its event semantics need to be re-spec'd against the new model. Confirm with user.
+3. **`[TBD]` `more_like` positive signal:** old design used long-press on current card. Is long-press preserved, replaced by a dedicated "⭐ / ♥" affordance on the card, or removed for v0? Confirm with user.
+4. **`[TBD]` End-session affordance:** the old "End session" button needs a new home in the carousel UI. Options: persistent footer; revealed after the last card is reached; auto-trigger only (N=15 sec inactivity). Confirm with user.
+5. **`[TBD]` Card visual content:** what does each card show? Segment title, agent handle, cover art, duration, elapsed-within-segment indicator? Pixel layout deferred until gesture model is confirmed.
+6. **`[TBD]` First-card boundary:** navigating backward from segment 0 — no-op, bounce animation, or wraparound? (Wraparound is almost certainly wrong for a linear radio show; flagged for completeness.)
+7. **`[TBD]` Autoplay on card navigation:** when navigating to prev/next card, does playback auto-start, or does the user tap the newly-centered card to play? Current assumption above: auto-start on navigation, because the carousel metaphor implies the centered card is "live." Confirm with user.
+
+### Reference — Huxe UX (from public signals, April 2026)
+
+Informs but does not decide the spec above. Public sources:
+- App Store / Play Store listings: "AI Radio & Podcasts" — card-based player is visible in screenshots.
+- User feedback signal (App Store reviews): at least one report of previous-arrow behaving like next-arrow. Take-away for our spec: the semantic of "previous card" must be unambiguous — restarting *that segment* is the clearest interpretation. The decided UX above aligns with this read.
+- Deeper Huxe gesture details (swipe physics, peek sizing, haptics) are not publicly documented at a level useful to this spec. Do not copy pixel-for-pixel; match the *metaphor* (carousel, centered card, discrete segments), leave the execution details to iteration.
 
 ## Dependencies on other components
 
@@ -73,6 +89,8 @@ const audioContext = new AudioContext();  // ONE, shared across all <audio> elem
 | `learning-loop` | emits `EpisodeSignals`-shape events | out |
 
 ## Build plan touchpoints
+
+> **Stale-reference notice:** the Day 3 / Day 4 items below still reference the old ⟲-15s / ⏭-skip / long-press control model. Under the carousel-of-cards UX (see "UI layout" above), these controls are subsumed by card navigation gestures. Re-scope after the `[TBD]` items in "UI layout" are resolved with the user.
 
 - **Day 3:** Pitch-round view (SSE subscriber, animates each event). Basic player: `<audio>` element + overlay card + ⟲-15s + ⏭ skip. Music filler class. Single shared AudioContext unlock (see Reviewer Concern #2). POST `/react` on skip/replay. See Reviewer Concern #4 for Day-3 scope cut.
 - **Day 4 morning:** P13 client-queue + gapless transitions (moved from Day 3 per audio/docs). Long-press `more_like` detector (400ms).
@@ -87,6 +105,8 @@ const audioContext = new AudioContext();  // ONE, shared across all <audio> elem
 - Demo: all 3 signals (skip, replay, more_like) emit with correct `segment_position_sec` captured at the right moment
 
 ## Reviewer concerns
+
+> **Stale-reference notice:** concerns #2, #3, and #5 below were written against the old ⟲-15s / ⏭-skip / segment-chip control model. Under the carousel UX they need revisit — keeping them here as historical context until the `[TBD]` items in "UI layout" are resolved.
 
 ### 1. Browser autoplay unlock fragility (severity: CRITICAL) — B-3
 
