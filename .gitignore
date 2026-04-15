@@ -1,2 +1,5 @@
 **/.DS_Store
 **/.vscode
+course.md
+**/tmp/
+**/venv/
