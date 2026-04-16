@@ -106,7 +106,7 @@ Master's Producer-memory has 4 fields: `target_length_preference_sec`, `opener_a
 
 ### 5. `priority` formula + memory-isolation invariant (severity: low, doc-clarity) — A-Clarity
 
-Producer must NEVER read raw `entity_scores` / `topic_scores` from agent memory. Sees only the scalar `priority: float` on each Pitch. See `agents/docs/DESIGN.md` Reviewer Concern #1 for the formula. Enforced by code review; no programmatic check needed in v0.
+Producer must NEVER read raw agent memory fields (`profile_state`, `topic_multiplier`, or the superseded `entity_scores` / `topic_scores`). Sees only the scalar `priority: float` on each Pitch. See `agents/docs/DESIGN.md` Reviewer Concern #1 for the formula. Enforced by code review; no programmatic check needed in v0.
 
 ## Open questions (component-scoped)
 

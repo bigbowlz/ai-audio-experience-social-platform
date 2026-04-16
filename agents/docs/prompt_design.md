@@ -49,7 +49,7 @@ class ClaimKind(str, Enum):
 
 | `claim_kind` | Precondition                                                                          | Rationale                                                                                                                                                                                                                                                                                                                  |
 | ------------ | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rising`     | `long_term[T] > 0` AND `recent[T] > long_term[T]` AND `like_count(provenance[T]) ≥ 3` | Topic has an established base (`long_term > 0`) but recent attention is outpacing it, with ≥3 likes as evidence floor. `long_term > 0` prevents like-only topics from matching — those are `discovery`, not `rising`. Both scores are L1-normalized, so the comparison is unit-consistent (see youtube spec §Aggregation). |
+| `rising`     | `long_term[T] > 0` AND `recent[T] > long_term[T]` AND `like_count(provenance[T]) ≥ 3` AND `stats.total_recent_weight ≥ 2.0` | Topic has an established base (`long_term > 0`) but recent attention is outpacing it, with ≥3 likes as evidence floor and sufficient recent-window confidence (`total_recent_weight ≥ 2.0` prevents "rising" claims from sparse recent windows where L1-normalized shares are artificially inflated). `long_term > 0` prevents like-only topics from matching — those are `discovery`, not `rising`. Both scores are L1-normalized, so the comparison is unit-consistent (see youtube spec §Aggregation). |
 | `discovery`  | `long_term[T] == 0` AND `like_count(provenance[T]) ≥ 2`                               | Topic appears only in likes, no subscriptions. ≥2 likes avoids "discovery" claims from a single drive-by like.                                                                                                                                                                                                             |
 | `durable`    | `long_term[T] > 0` AND `sub_count(provenance[T]) ≥ 2`                                 | ≥2 subscriptions is the floor for "you've been into X." One sub is anecdotal.                                                                                                                                                                                                                                              |
 | `neutral`    | default — none of the above hold                                                      | Safe fallback. Hook states topic + provenance facts without temporal framing.                                                                                                                                                                                                                                              |
@@ -62,13 +62,14 @@ def compute_claim_kind(
     long_term: dict[str, float],
     recent: dict[str, float],
     provenance: list[Contributor],
+    total_recent_weight: float,
 ) -> ClaimKind:
     sub_count = sum(1 for c in provenance if c["kind"] == "sub")
     like_count = sum(1 for c in provenance if c["kind"] == "like")
     lt = long_term.get(topic, 0.0)
     rt = recent.get(topic, 0.0)
 
-    if lt > 0 and rt > lt and like_count >= 3:
+    if lt > 0 and rt > lt and like_count >= 3 and total_recent_weight >= 2.0:
         return ClaimKind.RISING
     if lt == 0.0 and like_count >= 2:
         return ClaimKind.DISCOVERY
@@ -88,7 +89,7 @@ Each candidate in the bundle passed to `pitch()`'s LLM step includes `claim_kind
 | `discovery`  | "you've been exploring X", "some X caught your eye recently"                                        | "deep into", "longtime", "always"                                                                                   |
 | `neutral`    | factual: "X showed up in your [subs/likes]", reference specific channel/video names from provenance | any temporal or intensity claim                                                                                     |
 
-**Why this catches the failure mode.** The jazz-from-one-old-like scenario: `like_count = 1`, `recent[jazz]` likely small, `long_term[jazz]` likely 0 → fails `rising` (count < 3), fails `discovery` (count < 2), fails `durable` (lt = 0) → `neutral`. Hook can only say "jazz showed up in a recent like from [channel]" — factually correct, no confidence inflation.
+**Why this catches the failure mode.** The jazz-from-one-old-like scenario: `like_count = 1`, `recent[jazz]` likely small, `long_term[jazz]` likely 0 → fails `rising` (count < 3 and `total_recent_weight` likely < 2.0), fails `discovery` (count < 2), fails `durable` (lt = 0) → `neutral`. Hook can only say "jazz showed up in a recent like from [channel]" — factually correct, no confidence inflation. The `total_recent_weight` floor additionally prevents "rising" claims from sparse recent windows where a few old likes dominate the L1-normalized distribution — 3 likes from 2 years ago may pass `like_count ≥ 3` but will have `total_recent_weight ≈ 0.2`, well below the 2.0 floor.
 
 ### Rejected alternatives
 
@@ -142,9 +143,9 @@ def compute_provenance_shape(provenance: list[Contributor]) -> ProvenanceShape:
 
 No conflict resolution needed — the precondition tables are compatible by construction.
 
-### Hook-fidelity rubric (for K=5 / split revisit)
+### Hook-fidelity rubric (post-v0 measurement framework, not a v0 gate)
 
-The youtube spec defers the K=5 and 2/3-split revisit to when "hook-hallucination measurements" exist. This rubric defines those measurements. Score each hook on 5 axes, 0–2 each (10 points total):
+The youtube spec defers the K=5 and 2/3-split revisit to when "hook-hallucination measurements" exist. This rubric defines those measurements. **v0: K=5 and the 2/3 split are hardcoded. The rubric is not a gate for shipping.** It exists as the measurement framework for the post-v0 revisit and as a "what good looks like" reference for the developer eyeballing hooks during Day 3. **v0 evaluation method:** human eval by developer on 20+ hooks generated from dev-account data. v1+: LLM-assisted eval as an option. Score each hook on 5 axes, 0–2 each (10 points total):
 
 | Axis                         | 0                                                                                                                           | 1                                                                                                   | 2                                                                                                                                   |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -176,16 +177,7 @@ youtube_agent has "no external search in `pitch()`" — content discovery is Pro
 
 ### Decision: `Brief.today_context` + Producer-owned scripting
 
-**`Brief.today_context`** is a structured field on `Brief`, populated before agents pitch, carrying the date/time/weather/calendar context that any agent can read:
-
-```python
-class TodayContext(TypedDict):
-    date: str                           # ISO 8601 date
-    day_of_week: str                    # "Tuesday"
-    time_of_day: str                    # "morning" | "afternoon" | "evening" | "night"
-    weather_summary: str | None         # "rainy, 14°C" — None if weather fetch failed
-    calendar_events: list[str] | None   # ["Team standup 10am", "Dentist 3pm"] — None if no calendar agent
-```
+**`Brief.today_context`** is a structured field on `Brief`, populated before agents pitch, carrying the date/time/weather/calendar context that any agent can read. For the canonical `TodayContext` and `Brief` shapes, see [`agents/docs/DESIGN.md`](DESIGN.md) §Brief shape.
 
 **Flow:**
 
@@ -208,24 +200,28 @@ class TodayContext(TypedDict):
 
 Weather and calendar agents already call their respective APIs in `fetch_context()`. Having Producer call the same APIs would duplicate the fetch. Instead, the orchestrator assembles `Brief.today_context` from agent `fetch_context()` return values — agents return context fragments, not mutate `Brief`.
 
-**Protocol note.** `fetch_context(brief: Brief) -> ScopeContext` per the `DataAgent` protocol takes `Brief` as input and returns `ScopeContext`. Weather and calendar agents return their today-context data as part of their `ScopeContext` (e.g., `ScopeContext.weather_summary`, `ScopeContext.calendar_events`). The **orchestrator** reads these fields from the returned `ScopeContext` and assembles `Brief.today_context` before calling `pitch()`. Agents do not mutate `Brief` — `Brief` is an input, not an output.
+**Protocol note (revised 2026-04-16).** `fetch_context(user_id: str) -> ScopeContext` per the `DataAgent` protocol takes only `user_id` and returns `ScopeContext`. `fetch_context()` does not receive `Brief` — weather and calendar agents _produce_ today-context data, so passing them a Brief with an incomplete `today_context` would be a circular dependency. `Brief` is assembled by the orchestrator _after_ Phase 1 and passed only to `pitch()`. Weather and calendar agents return their today-context data as part of their `ScopeContext` (e.g., `ScopeContext.weather_summary`, `ScopeContext.calendar_events`). The **orchestrator** reads these fields from the returned `ScopeContext` and assembles `Brief.today_context` before calling `pitch()`.
+
+**Sync barrier (decided 2026-04-16).** The orchestrator waits for ALL `fetch_context()` calls to complete before assembling `Brief` and calling `pitch()`. This is a full sync barrier: even if weather + calendar finish early, the orchestrator waits for youtube and alices (whose `ScopeContext` is needed by their own `pitch()`). The youtube spec's 15s `fetch_context()` deadline is within the demo's 75s wall-clock budget. Staggered pitching (each agent pitches as soon as its own fetch completes) saves ~5-10s in the worst case but adds orchestration complexity not worth the 6-day build.
 
 ```
-  Phase 1: fetch_context()                          Phase 2: pitch()
+  Phase 1: fetch_context(user_id)                   Phase 2: pitch(brief, ...)
   ┌────────────────────────┐                        ┌──────────────────┐
   │ weather_agent.fetch()  │──► ScopeContext ──┐    │ all 4 agents     │
   │ calendar_agent.fetch() │──► ScopeContext ──┤    │ pitch(brief, ..) │──► Pitches
   │ youtube_agent.fetch()  │──► ScopeContext    │    │                  │
   │ alices_agent.fetch() │──► ScopeContext    │    └──────────────────┘
   └────────────────────────┘                   │           ▲
-                                               │           │
+         ║                                     │           │
+         ║ SYNC BARRIER: wait for ALL          │           │
+         ║                                     │           │
                               Orchestrator: ───┘── Brief ──┘
                               assemble today_context
                               from weather + calendar
                               ScopeContext fields
 ```
 
-All `fetch_context()` calls run in parallel. The orchestrator reads weather + calendar results, assembles `Brief.today_context`, then calls `pitch()` on all agents with the completed Brief. youtube and alices `fetch_context()` don't contribute to `today_context`.
+All `fetch_context()` calls run in parallel. The orchestrator waits for all to complete, reads weather + calendar results, assembles `Brief.today_context`, then calls `pitch()` on all agents with the completed Brief. youtube and alices `fetch_context()` don't contribute to `today_context`.
 
 ### Rejected alternatives
 
@@ -265,14 +261,15 @@ Two fields added to `Pitch` for Producer consumption (set by the algo step in ea
 }
 ```
 
-`claim_kind` and `provenance_shape` are youtube-agent-specific fields. Weather, calendar, and alices agents set `claim_kind = "neutral"` and `provenance_shape = "balanced"` as defaults (their evidence shapes are structurally different and don't need the same guardrails). When those agents get their own designs, they may define agent-specific fields using the same Pitch extension pattern.
+`claim_kind` and `provenance_shape` are computed by agents that use the shared YouTube extractor (`youtube_agent` and `alices_agent`) via `compute_claim_kind()` and `compute_provenance_shape()`. `alices_agent` uses the same `InterestProfile` and provenance as `youtube_agent`, so it benefits from the same hallucination guardrails. Weather and calendar agents set `claim_kind = "neutral"` and `provenance_shape = "balanced"` as defaults (their evidence shapes are structurally different and don't need the same guardrails). When those agents get their own designs, they may define agent-specific fields using the same Pitch extension pattern.
 
 ### Step 1: deterministic prelude (segment selection + time budget)
 
 ```python
 TARGET_EPISODE_SECS = 360          # 6 min for v0; v1 reads from Brief or user pref
 SEGUE_OVERHEAD_SECS = 10           # per inter-segment segue
-OPEN_CLOSE_SECS = 25               # cold open (15s) + sign-off (10s)
+OPEN_CLOSE_SECS = 25               # cold open (15s, includes transition into segment 1) + sign-off (10s)
+MAX_SEGMENT_SEC = 90               # cap per segment; prevents budget overflow from guaranteed slots
 
 def select_segments(pitches_by_agent: dict[str, list[Pitch]]) -> list[Pitch]:
     selected = []
@@ -281,13 +278,18 @@ def select_segments(pitches_by_agent: dict[str, list[Pitch]]) -> list[Pitch]:
     # Phase 1: guaranteed slot — one per agent (highest priority)
     for agent, pitches in pitches_by_agent.items():
         best = max(pitches, key=lambda p: p["priority"])
+        # Clamp suggested_length_sec to prevent budget overflow
+        best = {**best, "suggested_length_sec": min(best["suggested_length_sec"], MAX_SEGMENT_SEC)}
         selected.append(best)
         remaining[agent] = [p for p in pitches if p is not best]
 
     # Phase 2: bonus slots — highest priority across all remaining pitches
     budget = TARGET_EPISODE_SECS - OPEN_CLOSE_SECS
     budget -= sum(p["suggested_length_sec"] for p in selected)
-    budget -= SEGUE_OVERHEAD_SECS * (len(selected) - 1)   # segues between segments
+    # N segments need N-1 segues: the first segment has no segue_in (cold_open
+    # includes the transition into segment 1), so only inter-segment transitions
+    # are counted. Each bonus segment's cost includes its own segue.
+    budget -= SEGUE_OVERHEAD_SECS * (len(selected) - 1)
 
     all_remaining = sorted(
         [p for ps in remaining.values() for p in ps],
@@ -296,15 +298,18 @@ def select_segments(pitches_by_agent: dict[str, list[Pitch]]) -> list[Pitch]:
     )
 
     for pitch in all_remaining:
-        cost = pitch["suggested_length_sec"] + SEGUE_OVERHEAD_SECS
+        clamped_len = min(pitch["suggested_length_sec"], MAX_SEGMENT_SEC)
+        cost = clamped_len + SEGUE_OVERHEAD_SECS
         if budget >= cost:
-            selected.append(pitch)
+            selected.append({**pitch, "suggested_length_sec": clamped_len})
             budget -= cost
 
     return selected
 ```
 
-**Budget arithmetic for v0:** 360s total − 25s open/close = 335s. 4 guaranteed segments at ~60–90s each ≈ 240–360s. With 4 segments, 3 segues × 10s = 30s. Leaves 335 − 270 (avg) − 30 = 35s for bonus slots — tight. Typical v0 episode: 4 segments, possibly 5 if segments are short. The per-agent guarantee consumes most of the budget by design — it's a 6-minute show.
+**Budget arithmetic for v0:** 360s total − 25s open/close = 335s. 4 guaranteed segments capped at 90s each = 360s max + 3 segues × 10s = 30s → 335 − 360 − 30 = −55s worst case without the cap. With `MAX_SEGMENT_SEC = 90`, guaranteed slots are bounded at 360s + 30s segues = 390s, which still exceeds the 335s budget. In practice, agents suggest 60–90s; the cap prevents outliers. If guaranteed slots still exceed the budget after capping, the bonus loop simply selects nothing — the episode is full from guaranteed slots alone. The Producer's LLM receives `target_total_secs` and adjusts segment scripts to fit. Typical v0 episode: 4 segments, possibly 5 if segments are short. The per-agent guarantee consumes most of the budget by design — it's a 6-minute show.
+
+**Cold open → segment 1 transition.** `cold_open` includes the lead-in to segment 1. There is no separate segue between them. Segment 1's `segue_in` is empty. This is reflected in the `OPEN_CLOSE_SECS` budget (15s for the cold open that transitions into segment 1, 10s for the sign-off) and in the segue count (`len(selected) - 1` inter-segment segues, not including a cold-open-to-segment-1 segue).
 
 **Thin-signal handling.** A thin-signal pitch has `thin_signal: true`. It competes normally in Phase 1 (it's the only pitch from that agent, so it wins its guaranteed slot). No special user-facing language. Producer's LLM scripts it like any other segment. The learning-loop receives likes/skips/replays on the segment — that's sufficient signal without prompting the user.
 
@@ -428,6 +433,16 @@ Producer reads `producer_memory` at script-time. This memory tracks cross-episod
 | `learning-loop`   | Producer memory shape — stub here, designed in learning-loop session                                                              | forward reference                               |
 | `weather_agent`   | Returns `weather_summary` in `ScopeContext` from `fetch_context()`; orchestrator assembles into `Brief.today_context`             | new contract                                    |
 | `calendar_agent`  | Returns `calendar_events` in `ScopeContext` from `fetch_context()`; orchestrator assembles into `Brief.today_context`             | new contract                                    |
+
+## Test mandate (added 2026-04-16, eng review)
+
+The deterministic functions in this doc are the guardrails that prevent hook hallucination. They must have unit tests before the LLM prompt step is built. Fixtures drawn from committed probe JSON at `tmp/ydata/probe_1776208130/`.
+
+| Function | Test coverage required |
+| --- | --- |
+| `compute_claim_kind()` | All 4 claim kinds + evaluation order (first match wins) + the jazz-from-one-old-like scenario + `total_recent_weight` floor on `rising` |
+| `compute_provenance_shape()` | All 3 shapes (balanced, sub_only, like_only) |
+| `select_segments()` | Phase 1 guaranteed slots + Phase 2 bonus by priority + budget exhaustion + thin-signal pitch handling + `MAX_SEGMENT_SEC` clamping + cold-open-has-no-segue arithmetic |
 
 ## Open questions (parked)
 

@@ -36,7 +36,11 @@ class DataAgent(Protocol):
     wallet_address: str | None                 # None for internal agents
 
     def load_memory(user_id: str) -> AgentMemory: ...
-    def fetch_context(brief: Brief) -> ScopeContext: ...
+    def fetch_context(user_id: str) -> ScopeContext: ...
+        # fetch_context() does not receive Brief — weather and calendar agents
+        # produce today-context data that the orchestrator assembles INTO Brief.
+        # Passing Brief here would be a circular dependency. Brief is only
+        # passed to pitch(). See prompt_design.md §3 for the sync barrier.
     def pitch(brief: Brief, memory: AgentMemory, context: ScopeContext,
               user_id: str) -> list[Pitch]:
         """3–5 ranked pitches, or exactly 1 thin-signal pitch when data is insufficient.
@@ -116,8 +120,8 @@ Extended fields (set by the algo step in each agent's `pitch()`, not by the LLM)
 ```
 
 - **`thin_signal`** (`bool`): `true` iff agent emitted exactly 1 pitch due to insufficient data. Producer uses this for time-budget allocation only; no special user-facing language.
-- **`claim_kind`** (`"durable" | "rising" | "discovery" | "neutral"`): deterministic temporal-framing constraint. See prompt_design.md §1 for preconditions and LLM prompt contract. Weather, calendar, and alices agents default to `"neutral"`.
-- **`provenance_shape`** (`"balanced" | "sub_only" | "like_only"`): deterministic evidence-framing constraint. See prompt_design.md §2 for per-shape LLM directives. Weather, calendar, and alices agents default to `"balanced"`.
+- **`claim_kind`** (`"durable" | "rising" | "discovery" | "neutral"`): deterministic temporal-framing constraint. See prompt_design.md §1 for preconditions and LLM prompt contract. Computed by `youtube_agent` and `alices_agent` (both use the shared extractor and `InterestProfile`). Weather and calendar agents default to `"neutral"`.
+- **`provenance_shape`** (`"balanced" | "sub_only" | "like_only"`): deterministic evidence-framing constraint. See prompt_design.md §2 for per-shape LLM directives. Computed by `youtube_agent` and `alices_agent`. Weather and calendar agents default to `"balanced"`.
 
 ## Dependencies on other components
 

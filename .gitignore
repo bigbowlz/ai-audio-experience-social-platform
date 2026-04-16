@@ -3,3 +3,5 @@
 course.md
 **/tmp/
 **/venv/
+**/__pycache__/
+.claude/*
