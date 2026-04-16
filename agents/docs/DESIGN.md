@@ -1,8 +1,11 @@
 # Component: `agents`
 
-**Status:** DRAFT (component extract from master design)
+**Status:** DRAFT (component extract from master design, reconciled 2026-04-15)
 **Master doc:** [`~/.gstack/projects/bigbowlz-ai-audio-experience-social-platform/wanlizhou-main-design-20260413-182237.md`](../../../../.gstack/projects/bigbowlz-ai-audio-experience-social-platform/wanlizhou-main-design-20260413-182237.md) — canonical source; this doc is scoped to the `agents` component only.
-**Reviewed:** 2026-04-13 (spec review 6/10, red-team)
+**Child specs:**
+- [`agents/youtube/docs/DESIGN.md`](../youtube/docs/DESIGN.md) — `InterestProfile`, TF-IDF, K=5 provenance, `pitch()` flow, `AgentMemory` schema (locked 2026-04-15)
+- [`agents/docs/prompt_design.md`](prompt_design.md) — hook guardrails (`claim_kind`, `provenance_shape`), today's-context handoff, Producer running-order, `EpisodeScript` output
+**Reviewed:** 2026-04-13 (spec review 6/10, red-team); reconciled 2026-04-15 against child specs
 
 ## Purpose
 
@@ -34,34 +37,96 @@ class DataAgent(Protocol):
 
     def load_memory(user_id: str) -> AgentMemory: ...
     def fetch_context(brief: Brief) -> ScopeContext: ...
-    def pitch(brief: Brief, memory: AgentMemory, context: ScopeContext) -> list[Pitch]:
-        """3–5 ranked pitches. Each pitch has topic, hook, suggested_length_sec, rationale."""
-    def observe(episode_id: str, signals: EpisodeSignals) -> None:
-        """Updates memory after user reacts. Owned by the learning-loop component."""
+    def pitch(brief: Brief, memory: AgentMemory, context: ScopeContext,
+              user_id: str) -> list[Pitch]:
+        """3–5 ranked pitches, or exactly 1 thin-signal pitch when data is insufficient.
+        Never any other cardinality. See prompt_design.md §4 for thin-signal shape."""
+    # observe() was dropped 2026-04-15 — learning-loop consumes EpisodeSignals
+    # directly from api-storage at session-end and writes signal-derived memory
+    # fields itself. See agents/youtube/docs/DESIGN.md §`AgentMemory` schema.
 ```
 
-**Pitch shape:**
+**`user_id` in `pitch()`.** Required for deterministic tie-breaking in candidate selection (`top_n_seeded` uses `(user_id, profile.computed_at)` as seed). See youtube spec §`pitch()` flow.
+
+### `Brief` shape
+
+`Brief` is the per-episode context object assembled by the orchestrator before agents pitch. All agents receive the same `Brief`.
+
+```python
+class TodayContext(TypedDict):
+    date: str                           # ISO 8601 date
+    day_of_week: str                    # "Tuesday"
+    time_of_day: str                    # "morning" | "afternoon" | "evening" | "night"
+    weather_summary: str | None         # "rainy, 14°C" — None if weather fetch failed
+    calendar_events: list[str] | None   # ["Team standup 10am", "Dentist 3pm"] — None if no calendar agent
+
+class Brief(TypedDict):
+    today_context: TodayContext         # assembled by orchestrator from weather + calendar ScopeContext
+    # v1+: user_preferences, episode_format, target_duration, etc.
+```
+
+`Brief.today_context` is populated by the orchestrator after Phase 1 (`fetch_context()`). Weather and calendar agents return their data as `ScopeContext` fields; the orchestrator reads those and assembles `today_context` before calling `pitch()`. See prompt_design.md §3 for the full flow.
+
+### `ScopeContext` shape
+
+`ScopeContext` is agent-specific — each agent's `fetch_context()` returns a `ScopeContext` carrying the data that agent's `pitch()` needs. The base shape is a TypedDict; agents extend it with their own fields.
+
+```python
+class ScopeContext(TypedDict, total=False):
+    """Base shape. Each agent adds its own fields."""
+    pass
+
+# youtube_agent's ScopeContext carries the InterestProfile:
+#   profile: InterestProfile        — from memory.profile_state (write-through on fetch success)
+#
+# weather_agent's ScopeContext carries:
+#   weather_summary: str            — assembled into Brief.today_context by orchestrator
+#
+# calendar_agent's ScopeContext carries:
+#   calendar_events: list[str]      — assembled into Brief.today_context by orchestrator
+#
+# alices_agent's ScopeContext carries:
+#   profile: InterestProfile        — from committed Day-0 JSON via shared extractor
+```
+
+### `Pitch` shape
+
+Base fields (all agents):
 
 ```json
 {
   "agent": "youtube",
   "title": "...",
   "hook": "...",
-  "suggested_length_sec": 240,
+  "suggested_length_sec": 90,
   "rationale": "...",
   "source_refs": ["..."],
   "priority": 0.91
 }
 ```
 
+Extended fields (set by the algo step in each agent's `pitch()`, not by the LLM):
+
+```json
+{
+  "thin_signal": false,
+  "claim_kind": "rising",
+  "provenance_shape": "balanced"
+}
+```
+
+- **`thin_signal`** (`bool`): `true` iff agent emitted exactly 1 pitch due to insufficient data. Producer uses this for time-budget allocation only; no special user-facing language.
+- **`claim_kind`** (`"durable" | "rising" | "discovery" | "neutral"`): deterministic temporal-framing constraint. See prompt_design.md §1 for preconditions and LLM prompt contract. Weather, calendar, and alices agents default to `"neutral"`.
+- **`provenance_shape`** (`"balanced" | "sub_only" | "like_only"`): deterministic evidence-framing constraint. See prompt_design.md §2 for per-shape LLM directives. Weather, calendar, and alices agents default to `"balanced"`.
+
 ## Dependencies on other components
 
-| Component | Contract | Direction |
-|---|---|---|
-| `learning-loop` | `AgentMemory` shape, `EpisodeSignals` shape, update rules | agents consume memory schema + observe() rules |
-| `producer` | consumes `list[Pitch]` | agents emit; producer ranks |
-| `payment` | `alices_agent` has `wallet_address` that receives tx | payment reads wallet from agent |
-| `api-storage` | `agent_memory` table (jsonb per user_id+agent_name) | agents persist through api-storage |
+| Component       | Contract                                                                                                                                          | Direction                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `learning-loop` | `AgentMemory` shape, `EpisodeSignals` shape (both locked 2026-04-15 in `agents/youtube/docs/DESIGN.md`); learning-loop owns signal-derived writes | agents consume memory schema; no `observe()` hook |
+| `producer`      | consumes `list[Pitch]`                                                                                                                            | agents emit; producer ranks                       |
+| `payment`       | `alices_agent` has `wallet_address` that receives tx                                                                                            | payment reads wallet from agent                   |
+| `api-storage`   | `agent_memory` table (jsonb per user_id+agent_name)                                                                                               | agents persist through api-storage                |
 
 ## Build plan touchpoints
 
@@ -78,19 +143,15 @@ class DataAgent(Protocol):
 
 ## Reviewer concerns
 
-### 1. `priority` formula ambiguity (A-Clarity, severity: medium)
+### 1. `priority` computation (A-Clarity, severity: medium) — RESOLVED 2026-04-15
 
-Master uses `priority: 0.91` in the Pitch shape but never specifies who computes it or with what formula. Producer is memory-blind (P9 invariant), so the agent must compute `priority` before handing the Pitch over.
+**Original concern:** Master uses `priority: 0.91` but never specifies who computes it or with what formula.
 
-**Spec:** each agent computes
-```
-priority = sigmoid(
-  base_priority(pitch)
-  + w_entity * entity_scores[pitch.entity]
-  + w_topic  * sum(topic_scores[t] for t in pitch.topic_tags) / len(pitch.topic_tags)
-)
-```
-Output range `[0, 1]`. Weights are per-agent (agents may emphasize entity vs. topic differently). **Producer sees only the scalar `priority`, never raw scores.** This IS the memory-isolation invariant in executable form.
+**Resolution:** Each agent's `pitch()` has a two-step pipeline: (1) deterministic algo step assembles candidates and computes per-candidate scores, (2) LLM step selects 3–5 and assigns `priority ∈ [0, 1]`. For youtube_agent specifically, the algo score is `combined_topic_scores[T] * topic_multiplier.get(T, 1.0)` — the LLM sees this score in the candidate bundle and sets priority informed by it. See youtube spec §`pitch()` flow for the full mechanism.
+
+**Producer sees only the scalar `priority`, never raw scores or memory.** This IS the memory-isolation invariant (P9) in executable form.
+
+The original sigmoid formula (`entity_scores`, `topic_scores`, `pitch.topic_tags`) was a pre-youtube-spec placeholder. The youtube spec's `InterestProfile` replaced entity-level scoring with topic-level TF-IDF; memory replaced `entity_scores`/`topic_scores` with `topic_multiplier: dict[str, float]`. The sigmoid is superseded.
 
 ### 2. SSE `phase` field missing on agent events (A-Completeness, severity: medium)
 
@@ -104,5 +165,11 @@ Alice's voice-cloning on Day 0 is labeled fallback in master — if Alice declin
 
 ## Open questions (component-scoped)
 
-- **Agent memory cold-start:** on a user's very first generation, all `entity_scores` / `topic_scores` are empty. Does `priority` default to `base_priority(pitch)` alone? Yes. Document this.
-- **`topic_tags` extraction:** where does a pitch's topic tags come from? Agent-level LLM call at pitch-time, OR pre-computed on fetch_context, OR hand-tagged in content packs for `alices_agent`? **Recommended:** agent-level at pitch-time for YouTube/Calendar/Weather; hand-tagged for `alices_agent` (content is curated upstream).
+### Resolved (2026-04-15)
+
+- **Agent memory cold-start** — resolved in youtube spec §Bootstrap defaults + §Cross-field invariants. `topic_multiplier == {} → .get(T, 1.0)` default makes cold-start identical to "all topics at neutral multiplier." No special branching needed. Empty `combined_topic_scores` triggers thin-signal pitch (exactly 1 pitch, see prompt_design.md §4).
+- **`topic_tags` extraction** — resolved in youtube spec §Topic tagging. Tags come from YouTube Data API's `topicCategories` (Wikipedia URLs → kebab-case normalization). Channel-level tags via `channels.list?part=topicDetails` (server API key); per-video tags via `videos.list?part=topicDetails`. Coverage: 100% channels, 89.6% videos on dev data. No LLM fallback needed for v0. `alices_agent` uses the same tags from committed Day-0 JSON.
+
+### Open
+
+- **Weather/calendar agent `pitch()` prompt design.** These agents are structurally simpler (structured input → pitch, no TF-IDF) but their LLM calls still need prompt specs. Deferred to their respective design sessions. prompt_design.md specifies only their `today_context` population contract and `ScopeContext` fields.
