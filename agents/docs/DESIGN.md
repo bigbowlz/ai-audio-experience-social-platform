@@ -24,6 +24,23 @@ Four agents that produce ranked `Pitch` objects for the Producer. Each owns its 
 - **P9** Agents are real agents; per-user memory; own `DataAgent` interface
 - **P10** External agent invoked by Producer, paid agentically
 
+## Two-LLM boundary: why agents pitch and Producer scripts (decided 2026-04-16)
+
+The pipeline has two LLM boundaries — one inside each agent's `pitch()`, one inside Producer's script pass. This is not an accident of layering; it's the primary mechanism for limiting hallucination surface across the system.
+
+**Taste vs. production.** Agents know the user's taste; Producer knows how to make radio. The agent LLM operates on provenance (channels, videos, subscription dates, like timestamps) and writes hooks constrained by deterministic `claim_kind` + `provenance_shape` guardrails. The Producer LLM operates on `Pitch` objects + `Brief.today_context` and writes episode scripts with segues, cold opens, and today's framing. Neither LLM is asked to do the other's job. An agent never scripts radio; Producer never classifies taste signals.
+
+**Hallucination surface and why separation limits it.** Each LLM call has a hallucination surface proportional to the gap between what it's asked to produce and what its input can verify. Collapsing both boundaries into a single Producer LLM call would force one model to simultaneously (a) select topics from scored candidates with provenance evidence, (b) write hooks that respect temporal and evidence constraints, and (c) script a full episode with segues and today's context. The combined input surface — provenance entries, scores, weather, calendar, episode pacing — is large enough that factual claims about user taste become unverifiable noise in a scripting context. Separation keeps each LLM's input small and its claims auditable:
+
+- **Agent LLM** input: ~8 candidates with provenance, scores, `claim_kind`, `provenance_shape`. Output: 3–5 hooks. Every factual claim maps to a provenance entry the system can trace. Guardrails are structural (deterministic `claim_kind` computed pre-LLM), not prompt-only.
+- **Producer LLM** input: 4–8 selected `Pitch` objects (hooks already written and constrained) + `today_context`. Output: episode script. Producer never sees raw provenance or scores — it can't hallucinate taste claims because it doesn't have the raw evidence to misinterpret. It inherits the agent's already-constrained hooks and wraps them in radio narration.
+
+The boundary also means a hallucination in one layer doesn't compound in the other. If an agent hook slightly overstates interest (scoring 1/2 on the non-fabrication rubric), Producer's script doesn't amplify it further because Producer treats the hook as a creative brief, not as evidence to extrapolate from. Without the boundary, a single LLM seeing raw provenance + episode context would both misclassify the evidence *and* script confident narration around the misclassification — compounding the error in the final spoken output.
+
+**What stays in the agent LLM vs. what moves to Producer.** Agent `pitch()` owns: topic selection (3–5 from ~8 candidates), hook writing (constrained by guardrails), and priority assignment (taste-informed weighting). Producer owns: segment selection from the pitch pool (deterministic `select_segments()`), running order, segment lengths, segues, cold open, sign-off, and today's-context weaving. Segment length is a production concern — agents have no concept of radio pacing. Producer assigns lengths from a per-agent default table (`DEFAULT_SEGMENT_SEC` in `producer/segments.py`) and can override via `length_overrides` (e.g. from Producer memory or user preferences). When marketplace agents need self-description, `default_segment_sec` moves to `DataAgent` metadata.
+
+See prompt_design.md §1–§2 for the guardrail specifics, and youtube spec §Step 2 for the input-bounded constraint.
+
 ## Interface contract
 
 ```python
@@ -102,7 +119,6 @@ Base fields (all agents):
   "agent": "youtube",
   "title": "...",
   "hook": "...",
-  "suggested_length_sec": 90,
   "rationale": "...",
   "source_refs": ["..."],
   "priority": 0.91

@@ -156,7 +156,8 @@ if __name__ == "__main__":
     selected = select_segments(pitches_by_agent)
     print(f"── Running order ({len(selected)} segments) ──")
     for i, seg in enumerate(selected):
-        print(f"  {i+1}. [{seg['agent']}] {seg['title']} ({seg['suggested_length_sec']}s)")
+        length = seg.get('suggested_length_sec', '?')
+        print(f"  {i+1}. [{seg['agent']}] {seg['title']} ({length}s)")
     print()
 
     # ── Producer LLM pass ───────────────────────────────────────────

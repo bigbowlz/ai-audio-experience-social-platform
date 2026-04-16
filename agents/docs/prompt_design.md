@@ -23,7 +23,7 @@
                                                   └─────────────────────────────────────┘
 ```
 
-**Boundary contract.** Agents produce `Pitch` objects — informational briefs with hooks as structured creative input. Producer owns all scripting. Agent hooks are never spoken verbatim; they are input to Producer's script-writing LLM. Agents know the user's taste; Producer knows how to make radio.
+**Boundary contract.** Agents produce `Pitch` objects — informational briefs with hooks as structured creative input. Producer owns all scripting. Agent hooks are never spoken verbatim; they are input to Producer's script-writing LLM. Agents know the user's taste; Producer knows how to make radio. For why this two-LLM boundary exists (taste/production separation, hallucination surface isolation), see [`agents/docs/DESIGN.md` §Two-LLM boundary](DESIGN.md#two-llm-boundary-why-agents-pitch-and-producer-scripts-decided-2026-04-16).
 
 ---
 
@@ -271,15 +271,29 @@ SEGUE_OVERHEAD_SECS = 10           # per inter-segment segue
 OPEN_CLOSE_SECS = 25               # cold open (15s, includes transition into segment 1) + sign-off (10s)
 MAX_SEGMENT_SEC = 90               # cap per segment; prevents budget overflow from guaranteed slots
 
-def select_segments(pitches_by_agent: dict[str, list[Pitch]]) -> list[Pitch]:
+# Producer owns segment lengths — agents don't set them.
+# Per-agent defaults; overridable via length_overrides (from Producer memory, user prefs).
+DEFAULT_SEGMENT_SEC = {"youtube": 90, "weather": 45, "calendar": 30, "alices": 90}
+
+def select_segments(
+    pitches_by_agent: dict[str, list[Pitch]],
+    length_overrides: dict[str, int] | None = None,
+) -> list[Pitch]:
     selected = []
     remaining = {}
+
+    def _seg_len(pitch: Pitch) -> int:
+        agent = pitch["agent"]
+        if length_overrides and agent in length_overrides:
+            raw = length_overrides[agent]
+        else:
+            raw = DEFAULT_SEGMENT_SEC.get(agent, 60)
+        return min(raw, MAX_SEGMENT_SEC)
 
     # Phase 1: guaranteed slot — one per agent (highest priority)
     for agent, pitches in pitches_by_agent.items():
         best = max(pitches, key=lambda p: p["priority"])
-        # Clamp suggested_length_sec to prevent budget overflow
-        best = {**best, "suggested_length_sec": min(best["suggested_length_sec"], MAX_SEGMENT_SEC)}
+        best = {**best, "suggested_length_sec": _seg_len(best)}
         selected.append(best)
         remaining[agent] = [p for p in pitches if p is not best]
 
@@ -298,16 +312,18 @@ def select_segments(pitches_by_agent: dict[str, list[Pitch]]) -> list[Pitch]:
     )
 
     for pitch in all_remaining:
-        clamped_len = min(pitch["suggested_length_sec"], MAX_SEGMENT_SEC)
-        cost = clamped_len + SEGUE_OVERHEAD_SECS
+        seg_len = _seg_len(pitch)
+        cost = seg_len + SEGUE_OVERHEAD_SECS
         if budget >= cost:
-            selected.append({**pitch, "suggested_length_sec": clamped_len})
+            selected.append({**pitch, "suggested_length_sec": seg_len})
             budget -= cost
 
     return selected
 ```
 
-**Budget arithmetic for v0:** 360s total − 25s open/close = 335s. 4 guaranteed segments capped at 90s each = 360s max + 3 segues × 10s = 30s → 335 − 360 − 30 = −55s worst case without the cap. With `MAX_SEGMENT_SEC = 90`, guaranteed slots are bounded at 360s + 30s segues = 390s, which still exceeds the 335s budget. In practice, agents suggest 60–90s; the cap prevents outliers. If guaranteed slots still exceed the budget after capping, the bonus loop simply selects nothing — the episode is full from guaranteed slots alone. The Producer's LLM receives `target_total_secs` and adjusts segment scripts to fit. Typical v0 episode: 4 segments, possibly 5 if segments are short. The per-agent guarantee consumes most of the budget by design — it's a 6-minute show.
+**Segment length ownership (decided 2026-04-16).** Agents do not set `suggested_length_sec`. Producer assigns lengths from `DEFAULT_SEGMENT_SEC` (a per-agent lookup) and can override via `length_overrides` (e.g. from Producer memory learning per-agent length biases, or from user preferences). The `suggested_length_sec` field on selected pitches is set by Producer during `select_segments()`, not by agents during `pitch()`. When marketplace agents arrive, the default moves to `DataAgent` metadata so unknown agents can self-describe.
+
+**Budget arithmetic for v0:** 360s total − 25s open/close = 335s. 4 guaranteed segments capped at 90s each = 360s max + 3 segues × 10s = 30s → 335 − 360 − 30 = −55s worst case without the cap. With `MAX_SEGMENT_SEC = 90`, guaranteed slots are bounded at 360s + 30s segues = 390s, which still exceeds the 335s budget. Default lengths (youtube=90, weather=45, calendar=30, alices=90) total 255s + 3 segues = 285s, well within the 335s budget, leaving 50s for a bonus slot. The Producer's LLM receives `target_total_secs` and adjusts segment scripts to fit. Typical v0 episode: 4 segments, possibly 5 if segments are short. The per-agent guarantee consumes most of the budget by design — it's a 6-minute show.
 
 **Cold open → segment 1 transition.** `cold_open` includes the lead-in to segment 1. There is no separate segue between them. Segment 1's `segue_in` is empty. This is reflected in the `OPEN_CLOSE_SECS` budget (15s for the cold open that transitions into segment 1, 10s for the sign-off) and in the segue count (`len(selected) - 1` inter-segment segues, not including a cold-open-to-segment-1 segue).
 
@@ -321,7 +337,6 @@ def select_segments(pitches_by_agent: dict[str, list[Pitch]]) -> list[Pitch]:
     "title": "Your YouTube world",               # generic — no topic to name
     "hook": "Not enough signal yet to personalize. Pitch a general-interest
              segment in the agent's domain.",     # creative brief to Producer
-    "suggested_length_sec": 60,                   # shorter than a normal segment
     "rationale": "Thin signal — insufficient YouTube data to rank topics.",
     "source_refs": [],                            # no provenance to cite
     "priority": 0.3,                              # low but nonzero — guaranteed slot ensures inclusion
@@ -329,6 +344,8 @@ def select_segments(pitches_by_agent: dict[str, list[Pitch]]) -> list[Pitch]:
     "claim_kind": "neutral",
     "provenance_shape": "balanced",               # default; irrelevant for thin-signal
 }
+# Producer assigns suggested_length_sec from DEFAULT_SEGMENT_SEC["youtube"] = 90
+# during select_segments(). Agent does not set it.
 ```
 
 Producer scripts this segment using its own judgment for the agent's domain. The low priority means thin-signal segments will not win bonus slots, only their guaranteed slot.
@@ -346,7 +363,7 @@ Producer's LLM receives:
             "agent": "youtube",
             "title": "Jazz exploration",
             "hook": "...",                  # agent's creative brief — not spoken verbatim
-            "suggested_length_sec": 90,
+            "suggested_length_sec": 90,     # assigned by Producer from DEFAULT_SEGMENT_SEC
             "rationale": "...",
             "source_refs": [...],
             "priority": 0.91,
@@ -442,11 +459,11 @@ The deterministic functions in this doc are the guardrails that prevent hook hal
 | --- | --- |
 | `compute_claim_kind()` | All 4 claim kinds + evaluation order (first match wins) + the jazz-from-one-old-like scenario + `total_recent_weight` floor on `rising` |
 | `compute_provenance_shape()` | All 3 shapes (balanced, sub_only, like_only) |
-| `select_segments()` | Phase 1 guaranteed slots + Phase 2 bonus by priority + budget exhaustion + thin-signal pitch handling + `MAX_SEGMENT_SEC` clamping + cold-open-has-no-segue arithmetic |
+| `select_segments()` | Phase 1 guaranteed slots + Phase 2 bonus by priority + budget exhaustion + thin-signal pitch handling + `MAX_SEGMENT_SEC` clamping + cold-open-has-no-segue arithmetic + `DEFAULT_SEGMENT_SEC` applied when no overrides + `length_overrides` respected when provided |
 
 ## Open questions (parked)
 
 - **Producer's "what's new" feed (v1+).** Producer currently scripts from `today_context` + pitch content only. v1 may add a trending/news feed so Producer can weave in "new Kamasi Washington album" around a jazz segment. Interface: Producer receives `fresh_content: list[ContentItem]` alongside pitches. Not built for v0.
-- **Per-agent `suggested_length_sec` calibration.** v0 uses agent-provided values. If agents consistently over/under-estimate, Producer memory could learn a per-agent length bias. Deferred to learning-loop.
+- **Per-agent `suggested_length_sec` calibration.** v0 uses `DEFAULT_SEGMENT_SEC` (Producer-owned lookup). `select_segments()` accepts `length_overrides` so Producer memory can learn per-agent length biases and pass them in. Override mechanism is built; learning the biases is deferred to learning-loop.
 - **Multi-user ordering priors.** v0 `producer_memory` is empty. When multi-user data exists, ordering priors (e.g., "morning users prefer weather first") could be seeded from aggregate patterns. Deferred to v1+.
 - **Weather/calendar agent prompt design.** These agents are structurally simpler (structured input → pitch, no TF-IDF, no provenance compression) but their `pitch()` LLM calls still need prompt specs. Deferred to their respective design sessions. This doc specifies only their `today_context` population contract.
