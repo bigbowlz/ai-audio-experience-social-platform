@@ -471,7 +471,7 @@ def pitch(brief: Brief, memory: AgentMemory, profile: InterestProfile,
 
 **Step 2 — LLM, what and why:**
 
-- **Input-bounded.** Candidates bundle + brief. **No external search, no web fetch, no agentic loop.** Content discovery (fresh articles, new videos, world news) is Producer's job, not the agent's. The agent knows the user; Producer knows the world.
+- **Input-bounded.** Candidates bundle + brief. **No external search, no web fetch, no agentic loop.** Content discovery (fresh articles, new videos, world news) is Producer's job, not the agent's. The agent knows the user; Producer knows the world. For the full rationale on why this boundary limits hallucination surface, see [`agents/docs/DESIGN.md` §Two-LLM boundary](../../docs/DESIGN.md#two-llm-boundary-why-agents-pitch-and-producer-scripts-decided-2026-04-16).
 - **Constraint: pick from the candidate set.** The LLM re-ranks, writes hooks, and selects 3–5, but cannot invent topics outside `bundle`. Otherwise the algo layer is decorative and the deterministic demo beat is undermined.
 - **Output contract (clarified 2026-04-15).** Either **3–5 topic `Pitch` objects** with `title`, `hook`, `priority ∈ [0, 1]`, `source_refs` (channel_ids / video_ids drawn from the topic's provenance), **or exactly 1 thin-signal `Pitch`** when `combined_topic_scores` is empty (zero-subs zero-likes user, or first-ever episode where API failure left `profile_state` empty). **Never any other cardinality.** Producer is responsible for handling the 1-pitch thin-signal case in its running-order assembly (e.g., let other agents fill the slot, or play a "let me learn about you" segment).
 

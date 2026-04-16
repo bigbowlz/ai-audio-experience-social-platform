@@ -82,7 +82,6 @@ class CalendarAgent:
                 agent="calendar",
                 title=title,
                 hook=hook,
-                suggested_length_sec=30,
                 rationale=f"Calendar: {len(events)} event(s) today.",
                 source_refs=[],
                 priority=0.6,

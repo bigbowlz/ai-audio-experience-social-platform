@@ -169,7 +169,6 @@ def _thin_signal_pitch() -> Pitch:
             "Not enough signal yet to personalize. "
             "Pitch a general-interest segment in the YouTube domain."
         ),
-        suggested_length_sec=60,
         rationale="Thin signal — insufficient YouTube data to rank topics.",
         source_refs=[],
         priority=0.3,
@@ -309,7 +308,6 @@ class YouTubeAgent:
                 agent="youtube",
                 title=_topic_label(topic).title(),
                 hook=hook,
-                suggested_length_sec=90,
                 rationale=(
                     f"Topic '{topic}' scored {item['score']:.4f} "
                     f"(combined), claim_kind={claim_kind.value}."

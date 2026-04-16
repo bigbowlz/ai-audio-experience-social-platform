@@ -111,4 +111,4 @@ Producer must NEVER read raw agent memory fields (`profile_state`, `topic_multip
 ## Open questions (component-scoped)
 
 - **Tie-breaking in `select()`:** two pitches at identical `priority` — first-emitted wins? agent-index order? random-seed? **Recommended:** deterministic by `(priority DESC, agent_name ASC)` so tests are reproducible.
-- **Airtime reconciliation:** if selected pitches sum to ≠ target length, does Producer truncate a pitch or add a filler music transition? **Recommended:** pitch-level `length_sec` is a request from the agent; Producer is the authority and may shrink to fit (`min(suggested_length_sec, available_budget)`).
+- **Airtime reconciliation:** if selected pitches sum to ≠ target length, does Producer truncate a pitch or add a filler music transition? **Resolved (2026-04-16):** Producer owns segment lengths via `DEFAULT_SEGMENT_SEC` lookup in `producer/segments.py`. Agents do not set `suggested_length_sec`. `select_segments()` accepts `length_overrides` so Producer memory or user preferences can adjust per-agent defaults. All lengths are clamped to `MAX_SEGMENT_SEC`.

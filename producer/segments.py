@@ -16,12 +16,43 @@ SEGUE_OVERHEAD_SECS = 10
 OPEN_CLOSE_SECS = 25
 MAX_SEGMENT_SEC = 90
 
+# Per-agent default segment lengths (seconds).
+# Producer owns these — agents don't set their own lengths.
+# When marketplace agents arrive, this moves to DataAgent metadata.
+DEFAULT_SEGMENT_SEC: dict[str, int] = {
+    "youtube": 90,
+    "weather": 45,
+    "calendar": 30,
+    "alices": 90,
+}
+_FALLBACK_SEGMENT_SEC = 60
 
-def select_segments(pitches_by_agent: dict[str, list[Pitch]]) -> list[Pitch]:
+
+def _segment_length(pitch: Pitch, overrides: dict[str, int] | None = None) -> int:
+    """Resolve segment length for a pitch.
+
+    Priority: per-call overrides > DEFAULT_SEGMENT_SEC > fallback.
+    Always clamped to MAX_SEGMENT_SEC.
+    """
+    agent = pitch["agent"]
+    if overrides and agent in overrides:
+        raw = overrides[agent]
+    else:
+        raw = DEFAULT_SEGMENT_SEC.get(agent, _FALLBACK_SEGMENT_SEC)
+    return min(raw, MAX_SEGMENT_SEC)
+
+
+def select_segments(
+    pitches_by_agent: dict[str, list[Pitch]],
+    length_overrides: dict[str, int] | None = None,
+) -> list[Pitch]:
     """Select segments for the episode running order.
 
     Phase 1: one guaranteed slot per agent (highest priority pitch).
     Phase 2: bonus slots from remaining pitches by priority, within budget.
+
+    ``length_overrides`` lets the caller override the default per-agent
+    segment lengths (e.g. from Producer memory or user preferences).
     """
     selected: list[Pitch] = []
     remaining: dict[str, list[Pitch]] = {}
@@ -29,7 +60,8 @@ def select_segments(pitches_by_agent: dict[str, list[Pitch]]) -> list[Pitch]:
     # Phase 1: guaranteed slot — one per agent (highest priority)
     for agent, pitches in pitches_by_agent.items():
         best = max(pitches, key=lambda p: p["priority"])
-        clamped = {**best, "suggested_length_sec": min(best["suggested_length_sec"], MAX_SEGMENT_SEC)}
+        seg_len = _segment_length(best, length_overrides)
+        clamped = {**best, "suggested_length_sec": seg_len}
         selected.append(clamped)
         remaining[agent] = [p for p in pitches if p is not best]
 
@@ -46,10 +78,10 @@ def select_segments(pitches_by_agent: dict[str, list[Pitch]]) -> list[Pitch]:
     )
 
     for pitch in all_remaining:
-        clamped_len = min(pitch["suggested_length_sec"], MAX_SEGMENT_SEC)
-        cost = clamped_len + SEGUE_OVERHEAD_SECS
+        seg_len = _segment_length(pitch, length_overrides)
+        cost = seg_len + SEGUE_OVERHEAD_SECS
         if budget >= cost:
-            selected.append({**pitch, "suggested_length_sec": clamped_len})
+            selected.append({**pitch, "suggested_length_sec": seg_len})
             budget -= cost
 
     return selected

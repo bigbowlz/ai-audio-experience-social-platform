@@ -71,7 +71,6 @@ class WeatherAgent:
                 agent="weather",
                 title="Today's weather",
                 hook=hook,
-                suggested_length_sec=45,
                 rationale=f"Weather context: {weather}",
                 source_refs=[],
                 priority=0.5,

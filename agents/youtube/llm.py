@@ -79,7 +79,6 @@ Return a JSON array of objects. Each object has:
 - `title`: a short human-readable title for the segment (2–5 words)
 - `hook`: the creative brief (1–3 sentences)
 - `priority`: float in [0, 1]
-- `suggested_length_sec`: integer, 60–90
 
 Return ONLY the JSON array — no markdown fences, no commentary.
 """
@@ -186,7 +185,6 @@ def generate_pitches(
             agent="youtube",
             title=sel.get("title", topic.replace("-", " ").title()),
             hook=sel["hook"],
-            suggested_length_sec=max(60, min(90, int(sel.get("suggested_length_sec", 90)))),
             rationale=(
                 f"Topic '{topic}' scored {item['score']:.4f} "
                 f"(combined), claim_kind={claim_kind.value if isinstance(claim_kind, ClaimKind) else claim_kind}."
