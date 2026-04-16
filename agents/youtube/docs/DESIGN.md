@@ -8,12 +8,12 @@
 
 ## Purpose
 
-Pitch 3–5 ranked topics to the Producer derived from the user's YouTube world. The agent owns:
+Pitch 3–5 ranked topics to the Producer derived from the user's YouTube world (or, when both signal windows are empty, exactly **1 thin-signal pitch** — never any other cardinality; see §`pitch()` flow → Output contract). The agent owns:
 
 1. **Interest profile extraction** — ingest the user's YouTube signals (subscriptions + liked videos) via YouTube Data API v3, produce a recency-aware topic-scored `InterestProfile` (long-term + recent topic distributions) with channel/video provenance preserved for pitch-time grounding.
 2. **Pitch generation** — read the `InterestProfile` + `AgentMemory` + `Brief`, emit ranked `Pitch` objects.
 
-**Memory is read-only from this agent.** `AgentMemory` writes (signal ingestion, update rules, session-end batching) live entirely in the `learning-loop` component — see [§Memory boundary](#memory-boundary-decided-2026-04-15) below. The agent surfaces no `observe()` logic of its own; whether the `DataAgent` protocol retains an `observe()` method at all is a cross-component decision tracked in `learning-loop/docs/DESIGN.md`.
+**Signal-derived memory is read-only from this agent.** `topic_multiplier` writes (signal ingestion, update rules, session-end batching) live entirely in the `learning-loop` component — see [§Memory boundary](#memory-boundary-decided-2026-04-15) below. `DataAgent.observe()` is **dropped** from the protocol as of 2026-04-15 — learning-loop consumes `EpisodeSignals` directly; see §`AgentMemory` schema for the locked contract.
 
 This is the most design-heavy of the four agents: calendar and weather are structured-input → pitch; `alices_agent` is hand-curated content. YouTube is the only one where "what does a good interest profile look like?" is itself an open question.
 
@@ -21,12 +21,12 @@ This is the most design-heavy of the four agents: calendar and weather are struc
 
 `AgentMemory` is the single persisted state container for the (user, agent) pair. It hosts two co-located fields written by two different owners and read together by `pitch()`:
 
-- **`memory.profile_state`** — an `InterestProfile` (topic-scored, with channel/video provenance per topic). Written by `agents/youtube`'s `fetch_context()` via **write-through**: on every generation, attempt a live YouTube fetch + extractor pass; on success overwrite `memory.profile_state`; on failure skip the write and leave the previous value in place. Represents "what topics does this user care about on YouTube, long-term and recently, with evidence."
+- **`memory.profile_state`** — an `InterestProfile` (topic-scored, with channel/video provenance per topic). Written by `agents/youtube`'s `fetch_context()` via **write-through**: on every generation, attempt a live YouTube fetch + extractor pass; on success overwrite `memory.profile_state`; on failure skip the write and leave the previous value in place. The fetch **blocks episode generation** (Player streams a default music bed during the wait, see §Player coordination TBD) with a **15-second total deadline** per call; per-call timeouts and per-error-class retry/refresh policy are specified in §`fetch_context()` failure handling. Represents "what topics does this user care about on YouTube, long-term and recently, with evidence."
 - **`memory.topic_multiplier`** — `dict[str, float]`. Written by `learning-loop` at session-end using deterministic update rules over `/react` signals. Represents "how have in-app reactions updated our beliefs."
 
 Both are read by `pitch()`. They are orthogonal update streams — profile reflects off-platform taste, multiplier reflects in-platform feedback — but co-located in one persisted record so (a) `pitch()` does a single memory read, and (b) a failed YouTube fetch gracefully falls back to the last-written profile without any separate cache layer or fallback branch.
 
-`ScopeContext` (per `DataAgent` protocol) carries the current `memory.profile_state` to `pitch()` as `profile`; `AgentMemory` is passed alongside for `topic_multiplier`. The schema for `AgentMemory` is defined provisionally in this doc (see §`AgentMemory` schema) pending `learning-loop` component design.
+`ScopeContext` (per `DataAgent` protocol) carries the current `memory.profile_state` to `pitch()` as `profile`; `AgentMemory` is passed alongside for `topic_multiplier`. The schema for `AgentMemory` is defined in §`AgentMemory` schema (locked 2026-04-15).
 
 ## Data source (decided 2026-04-14 after empirical probe)
 
@@ -157,45 +157,137 @@ stats: {
 
 `total_recent_weight` is the key confidence signal for the recent window. A user with 3 old likes will have `total_recent_weight ≈ 0.1`; a user with 20 fresh likes will have `total_recent_weight ≈ 15`. The L1-normalized scores inside the window are still honest distributions of observable behavior, but the consumer can see how much signal underlies that distribution and down-weight claims accordingly.
 
-## `AgentMemory` schema (provisional — forward reference to `learning-loop`, 2026-04-15)
+## `AgentMemory` schema (locked 2026-04-15)
 
-`AgentMemory` is the persisted per-(user, agent) state record. It is defined here provisionally so `agents/youtube` can finalize its write-through contract; this definition will migrate to `learning-loop/docs/DESIGN.md` when that component is designed.
+`AgentMemory` is the persisted per-(user, agent) state record. It is the coupling contract between `agents/youtube` (and other topic-scored agents) and `learning-loop`. This section is the canonical definition; `learning-loop/docs/DESIGN.md` will reference this shape when that doc is rewritten — today's learning-loop draft predates this contract and uses a stale shape (`entity_scores` / `topic_scores` / `signal_weights`) that is superseded here.
+
+### Shape
 
 ```python
 class AgentMemory(TypedDict):
-    profile_state:     InterestProfile       # written by youtube-agent on successful fetch
-    topic_multiplier:  dict[str, float]      # written by learning-loop from /react signals
-    updated_at:        str                   # ISO 8601; bumped on any field write
+    schema_version:    int                  # = 1 for v0
+    profile_state:     InterestProfile      # owned by agents/youtube
+    topic_multiplier:  dict[str, float]     # owned by learning-loop
+    updated_at:        str                  # ISO 8601; bumped on any field write
 ```
 
-**Field ownership:**
+**`topic_multiplier` stays `dict[str, float]`** — not a richer audit-trail shape such as `list[(topic, multiplier, source_episode, timestamp)]`. Reasons:
 
-| Field              | Owner            | Write trigger                                                      | Read by               |
-| ------------------ | ---------------- | ------------------------------------------------------------------ | --------------------- |
-| `profile_state`    | `agents/youtube` | `fetch_context()`, iff live YouTube fetch + extractor both succeed | `pitch()`             |
-| `topic_multiplier` | `learning-loop`  | Session-end batched update over collected `/react` signals         | `pitch()`             |
-| `updated_at`       | both             | On any field write                                                 | debug / observability |
+- **Memory is current state, not history.** `pitch()` reads a single current multiplier per topic. A richer shape forces pitch() to fold history down to the latest value on every read, pushing learning-loop's internal structure into an agent's read path.
+- **Audit lives in the signals log, not memory.** Learning-loop already owns a `signals` table (see `learning-loop/docs` §Build plan) that preserves every `/react` event. Any "why did jazz move from 1.1× to 0.85×" question is answered by joining that log with `EpisodeSignals.emissions` — one lookup on the authoritative source, not a duplicated copy in memory.
+- **Session-end batching collapses history.** Multiple `/react` events on one topic within one session produce one aggregated delta per session. There is no natural "one entry per update" to preserve in a list without either losing the batching semantics or re-deriving them at read-time.
+- **Schema stability.** Flat `dict[str, float]` is the minimum shape learning-loop needs to write and agents need to read. Future richer structures (per-episode attribution snapshots, versioned history) can land as **new additive fields** on `AgentMemory` without rewriting this one.
 
-**Cross-field invariants:**
+`schema_version` is carried so future breaking changes (e.g., splitting `topic_multiplier` into current + history, or adding a second agent-owned signal-derived field) carry a cheap migration signal. v0 pins `schema_version = 1`.
 
-- Writers never reach into the other's fields. `fetch_context()` never touches `topic_multiplier`; learning-loop never touches `profile_state`.
-- On API-fetch failure, `fetch_context()` is a no-op write; `profile_state` retains its previous value. First-ever episode with failure → `profile_state` is an empty `InterestProfile` (see `InterestProfile` schema for empty-dict behavior) and `pitch()` degrades to thin-signal handling (see §`pitch()` flow).
-- `topic_multiplier` defaults to `1.0` on missing keys at pitch-time read, so a stale/fresh mismatch between `profile_state` topics and `topic_multiplier` keys does not error.
-- `updated_at` is advisory for debug only; staleness is not branched on — `pitch()` always runs against current memory state.
+### Field ownership
+
+| Field              | Owner            | Write trigger                                                      | Read by                          |
+| ------------------ | ---------------- | ------------------------------------------------------------------ | -------------------------------- |
+| `schema_version`   | api-storage      | Row creation; never mutated in v0                                  | both components, migration gates |
+| `profile_state`    | `agents/youtube` | `fetch_context()`, iff live YouTube fetch + extractor both succeed | `pitch()`                        |
+| `topic_multiplier` | `learning-loop`  | Session-end batched update over collected `/react` signals         | `pitch()`                        |
+| `updated_at`       | both             | On any field write                                                 | debug / observability            |
+
+Writers **never reach into the other's fields.** A code-review rule is sufficient in v0; formalization (per-field update policies, Supabase row-level policies) is a v1+ concern.
+
+### Cross-field invariants (v0)
+
+- **Multiplier default on miss.** `pitch()` reads `memory.topic_multiplier.get(T, 1.0)`. An absent key means "no signal, use raw profile score." Required for cold-start and for any topic that appears in the profile but has never been pitched.
+- **Multiplier keys ⊆ `profile_state.combined_topic_scores` keys (v0 invariant).** Holds because (a) multiplier writes only happen via `/react` signals on pitched topics, (b) pitched topics are constrained to candidates from `combined_topic_scores` (§`pitch()` flow), and (c) the v0 demo's short window gives YouTube data no time to drift a previously-pitched topic out of `combined`. v1 preserves this structurally via predefined-topics in `combined` (§V1+ open questions). The `.get(T, 1.0)` default means a future violation is silent (multiplier entry simply ignored), not crashing — the invariant is an expected property, not an asserted contract.
+- **Multiplier value range: `topic_multiplier[T] ∈ [0.1, 10.0]`.** Learning-loop clamps on write; `pitch()` does not re-clamp on read. `1.0` is the unit element so missing keys compose as identity. Zero / negative values are disallowed — they collapse ranking and make a demoted topic indistinguishable from a thin-signal pitch.
+- **Fetch failure is a no-op write.** On API-fetch failure, `fetch_context()` skips the `profile_state` write; the prior value is reused. First-ever episode with failure → `profile_state` is an empty `InterestProfile` (§`InterestProfile` schema) and `pitch()` degrades to thin-signal handling (§`pitch()` flow).
+- **`updated_at` is advisory.** Bumped on any field write. Never branched on by `pitch()` or learning-loop; staleness does not affect logic. Consumers: debug views, the `memory.update.applied` SSE beat.
+- **Neither writer blocks the other.** `fetch_context()` and learning-loop's session-end update modify disjoint fields; the only concurrent-write risk is last-write-wins on `updated_at`. v0 is single-user, single-process, sequential (§`fetch_context()` failure handling — "v0 multi-writer note"), so the risk is null. v1+ adds per-(`user_id`, `agent_id`) CAS on `updated_at`.
 
 **Why co-located rather than separate tables:** orthogonal update streams but co-consumed at pitch-time. One record = one read, one persisted blob, one source of truth for "what does this agent know about this user." Separate tables would need a join on every pitch and a cross-table consistency story for no benefit.
 
-## Aggregation: TF-IDF with sublinear TF and L1 normalization (decided 2026-04-14)
+### `EpisodeSignals` companion schema
 
-Topic scores use TF-IDF, computed independently per window, with sublinear TF scaling and L1 normalization per window.
+Learning-loop consumes session-level `EpisodeSignals` at session-end and derives its `topic_multiplier` writes from there. The shape is pinned here so Producer, Player, and learning-loop agree on emission.
 
-**Document set for IDF:** a "document" is a tagged entity — each subscribed channel is one doc; each liked video is one doc. Total docs `N = len(subs) + len(likes)`. For topic `T`, `df(T)` = count of entities whose topic list contains `T`. IDF is computed once per user and shared across both windows (IDF is a per-user "how informative is this topic for this user" fact, not window-specific):
+```python
+class PitchEmission(TypedDict):
+    segment_index:   int                  # position in the final running order
+    agent:           str                  # "youtube", "calendar", "weather", "alices"
+    topic:           str | None           # None for agents that don't do topic-level pitching
+    source_refs:     list[str]            # channel_ids / video_ids / etc., as emitted on the Pitch
+    priority:        float                # the priority at which this pitch entered the running order
+
+class ReactionEvent(TypedDict):
+    type:                   Literal["like", "skip", "replay"]
+    segment_index:          int           # foreign key into EpisodeSignals.emissions[*].segment_index
+    timestamp_ms:           int
+    segment_position_sec:   float         # playhead before mutation; see learning-loop/docs RC #4
+
+class EpisodeSignals(TypedDict):
+    schema_version:  int                  # = 1 for v0
+    episode_id:      str
+    user_id:         str
+    emissions:       list[PitchEmission]  # every pitch in the running order; written at episode start
+    reactions:       list[ReactionEvent]  # zero or more per episode; may be empty for silent sessions
+```
+
+**Why `emissions` is carried explicitly.** Learning-loop updating `topic_multiplier[T]` requires knowing `T` was pitched — and at what priority, if update rules want to weight the delta. The running order is built by Producer and consumed by Player; neither holds it after episode-end unless it's logged. Bundling `emissions` into `EpisodeSignals` means learning-loop has everything it needs in one record, without querying Producer's state post-hoc.
+
+**Why reactions reference `segment_index`, not `topic`.** The reaction happens on a playing segment, not a topic. The segment→topic mapping lives in `emissions` (one hop). Player's emission stays trivial (timestamp + segment index + type); the "which topic got skipped" inference is localized to learning-loop, where it belongs.
+
+**Emission protocol.** At episode start (before first segment plays), Producer writes `EpisodeSignals{episode_id, user_id, emissions: [...], reactions: []}` to api-storage. Player appends `ReactionEvent` rows via `/react` as they happen. At session-end, learning-loop reads the complete record and writes `topic_multiplier` for any topic-scored agent whose pitches appear in `emissions`.
+
+**Topic-less agents.** `weather_agent` pitches "it's going to snow" — no topic. `topic: None` in its `PitchEmission`. Learning-loop does not update `topic_multiplier` for that segment (the field is topic-keyed). Agents whose memory shape isn't topic-keyed at all live outside this contract and are designed in their own docs.
+
+### Bootstrap defaults
+
+On `load_memory(user_id, agent_name)` for a pair that has never had a row:
+
+```python
+AgentMemory(
+    schema_version   = 1,
+    profile_state    = InterestProfile(
+        long_term_topic_scores = {},
+        recent_topic_scores    = {},
+        combined_topic_scores  = {},
+        topic_provenance       = {},
+        computed_at            = now_iso(),
+        stats = {
+            "total_subs":            0,
+            "total_likes":           0,
+            "total_recent_weight":   0.0,
+            "unique_topics":         0,
+            "tag_coverage_pct":      0.0,
+            "avg_topics_per_entity": 0.0,
+        },
+    ),
+    topic_multiplier = {},
+    updated_at       = now_iso(),
+)
+```
+
+**Lazy creation.** api-storage returns the default above when no row exists for `(user_id, agent_name)`; the row is persisted on the first real write (either `fetch_context()` success or learning-loop's first session-end update). No coordinated signup fan-out across agents.
+
+**First-episode behavior chain:**
+
+1. `fetch_context()` runs. On success: `profile_state` overwritten with a real `InterestProfile`. On failure: empty `InterestProfile` remains in place.
+2. `pitch()` reads `profile_state.combined_topic_scores`. If empty (fetch failure or zero-subs/zero-likes user): emit exactly 1 thin-signal `Pitch` (§`pitch()` flow output contract).
+3. `topic_multiplier == {}` → `pitch()`'s `.get(T, 1.0)` default makes this identical to "all topics at neutral multiplier." No cold-start branching required inside `pitch()`.
+4. At session-end, learning-loop applies reactions (if any) → first non-empty `topic_multiplier` snapshot persists.
+
+## Aggregation: TF-IDF with sublinear TF and L1 normalization (decided 2026-04-14, IDF scope revised 2026-04-15)
+
+Topic scores use TF-IDF, computed independently per window (IDF included — see below), with sublinear TF scaling and L1 normalization per window.
+
+**All `log` references in this section are natural log (Python `math.log`).**
+
+**Document set for IDF — per window (revised 2026-04-15).** A "document" is a tagged entity. Long-term IDF treats each subscribed channel as one doc (`N_long = len(subs)`); recent IDF treats each liked video as one doc (`N_recent = len(likes)`). For topic `T` in a given window, `df_window(T)` = count of entities in *that* window whose topic list contains `T`. IDF is computed independently per window:
 
 ```
-idf(T) = log((N + 1) / df(T))          # natural log, additive numerator smoothing
+idf_long(T)   = log((N_long   + 1) / df_long(T))
+idf_recent(T) = log((N_recent + 1) / df_recent(T))
 ```
 
-**Why the `+1` smoothing (2026-04-15).** Without it, when a topic tags every entity (`df(T) = N`) — e.g., a 3-sub user all tagged `music` — `log(N/df) = log(1) = 0` zeros out that topic entirely and the user ends up with no scored profile despite clearly-observable taste. With `+1` in the numerator, the universal topic still scores small-but-positive (`log(4/3) ≈ 0.29` for N=3), and the relative ordering between informative and uninformative topics is unchanged at meaningful N (lifestyle 7/20 vs. rare 1/20: ratio 0.35 → 0.36). Classic additive smoothing, one-line cost, fixes the edge case honestly.
+Empty windows (`N_window = 0`) skip IDF computation; the window returns `{}` per the empty-signal rule in §`InterestProfile` schema.
+
+**Numerator-only Laplace smoothing.** Without smoothing, when a topic tags every entity in a window (`df = N`) — e.g., a 3-sub user all tagged `music` — `log(N/df) = log(1) = 0` zeros out that topic and the user ends up with no scored profile despite clearly-observable taste. The chosen smoothing `log((N+1)/df)` is **asymmetric** — numerator only, not the symmetric textbook Laplace `log((N+1)/(df+1))`. The asymmetry preserves a stronger gap between rare and common terms at the low N that dominates v0 (dev's 96 subs / 77 likes is small by IR standards). Ordering between informative and uninformative topics is unchanged at meaningful N (lifestyle 7/20 vs. rare 1/20: ratio 0.35 → 0.36). A textbook-IDF auditor will flag the asymmetry; we accept that as a deliberate Laplace variant.
 
 **Term frequency, per window:**
 
@@ -212,26 +304,28 @@ idf(T) = log((N + 1) / df(T))          # natural log, additive numerator smoothi
   tf_recent[T] += decayed_weight
   ```
 
-**Sublinear TF scaling.** After raw TF accumulation, apply per window:
+**Sublinear TF scaling (revised 2026-04-15).** After raw TF accumulation, apply per window:
 
 ```
-tf[T] := 1 + log(tf[T])          when tf[T] > 0
+tf[T] := log(1 + tf[T])
 ```
 
-Prevents a single dominant source from swamping a topic's score — e.g., one channel with 20 likes shouldn't contribute 20× another channel's single like. Classic IR dampening; same shape text retrieval systems have used for decades.
+Smooth, non-negative for all `tf ≥ 0`, monotone, no conditional needed. Prevents a single dominant source from swamping a topic's score — e.g., one channel with 20 likes shouldn't contribute 20× another channel's single like.
 
-**Score = TF × IDF, then L1-normalize per window:**
+**Why `log(1 + tf)` instead of the more common `1 + log(tf)`:** the recent window's TF is a sum of decayed weights, often fractional (e.g., one 270-day-old like has `decayed_weight ≈ 0.125`). The naive `1 + log(0.125) = -1.08` produces *negative* TF, breaks L1 normalization (sum can flip sign or vanish), and silently corrupts every recent score on aged-like data — precisely dev's own probe shape (77 likes spread over 8 years). `log(1 + tf)` is well-defined and non-negative for all `tf ≥ 0`, integer or fractional.
+
+**Score = TF × IDF (per-window), then L1-normalize per window:**
 
 ```
-score[window][T] = tf_sublinear[window][T] × idf(T)
+score[window][T] = tf_sublinear[window][T] × idf_window(T)
 score[window]    := score[window] / sum(score[window].values())   # L1
 ```
 
 Empty windows (raw TF dict has no keys) skip normalization and return `{}`.
 
-**Why this handles broad-term pollution without extra filters.** `lifestyle` appearing on 7 of dev's first 20 probed subs has `idf ≈ log(21/7) ≈ 1.10`. A rare genre on 1/20 has `idf ≈ log(21/1) ≈ 3.04`. Pervasive tags get ~3× penalized against rare ones automatically — no separate "drop topics appearing on >X% of channels" rule needed.
+**Why this handles broad-term pollution without extra filters.** In the long-term window, `lifestyle` appearing on 7 of dev's first 20 probed subs has `idf_long ≈ log(21/7) ≈ 1.10`. A rare genre on 1/20 has `idf_long ≈ log(21/1) ≈ 3.04`. Pervasive tags get ~3× penalized against rare ones automatically — no separate "drop topics appearing on >X% of channels" rule needed. Same logic applies independently inside the recent window with its own IDF.
 
-**Why shared IDF across windows (not per-window).** IDF answers "how informative is this topic for this user"; that's a user-global fact. Per-window IDF would flip a topic's informativeness based on which window the consumer happens to be looking at — noise, not signal. Shared IDF keeps the long-term and recent scores on a consistent semantic basis.
+**Why per-window IDF (revised 2026-04-15 from shared user-IDF).** Earlier draft computed one IDF over `subs ∪ likes`. The flaw: a user with 96 subs (none `jazz`) and **10 jazz likes** vs. another with 96 subs (none `jazz`) and **2 jazz likes** — same user-level narrative ("jazz is their recent thing") — yields *lower* IDF for the active liker (`log(107/10) ≈ 2.37`) than the casual one (`log(99/2) ≈ 3.90`). More evidence → less informativeness, exactly backwards from intent. Per-window IDF answers "how informative is this topic *within this evidence base*" — the recent window's IDF doesn't dilute when a user racks up jazz likes; it stays self-consistent as a recent-attention measure. The L1 normalization per window already keeps cross-window comparison unit-consistent ("`recent['jazz'] > long_term['jazz']`" = "jazz is a bigger share of recent than long-term attention"); per-window IDF keeps the *within*-window comparisons honest too.
 
 **Why no hard-cap on topic count.** After TF-IDF + L1 the long tail of rarely-relevant topics naturally shrinks to small fractions. `pitch()` reads the dict as-is and makes its own top-N selection at prompt-assembly time. Profile stays honest about the distribution shape.
 
@@ -243,7 +337,7 @@ Empty windows (raw TF dict has no keys) skip normalization and return `{}`.
 
 1. Gather all subscribed channels whose topics include `T` → sort by `subscribed_at` **ascending** (oldest first — ingrained taste reads first). Take first 2.
 2. Gather all liked videos whose topics include `T` → sort by `liked_at` **descending** (most recent first). Take first 3.
-3. Concatenate (subs block, then likes block). If one side is short, fill from the other up to K=5.
+3. Concatenate (subs block, then likes block). If one side is short, fill from the **other side continuing in the same sort order** — e.g., subs side short → take next-newest likes (positions 4, 5, ... in `liked_at` desc); likes side short → take next-oldest subs (positions 3, 4, ... in `subscribed_at` asc). Up to K=5 total. (Determinism note 2026-04-15: continuing in the same sort order, rather than switching direction or sampling, makes contributor selection reproducible for unit tests.)
 
 **Why this order.** LLMs consuming structured lists tend to give weight to early entries. Subs-first-then-likes surfaces durable-taste grounding ("you've been subscribed to Anjunadeep since 2019") before recent-attention grounding ("and you liked this Mr. Suicide Sheep track last month"), producing natural narrative voice at pitch-time.
 
@@ -255,6 +349,8 @@ Empty windows (raw TF dict has no keys) skip normalization and return `{}`.
 - API responses are cached; a debug view can recompute the full list on demand.
 - The score itself (TF×IDF) reflects the full long-tail — compression affects only provenance, not ranking.
 
+**K is tunable; revisit when hook-quality data exists (2026-04-15).** K=5 and the 2/3 split are provisional — chosen to give the LLM enough provenance for grounded hooks without bloating prompt budget, but the right K depends on hook-hallucination measurements that don't exist yet. Once a hook-fidelity rubric and real-data hooks-to-grade exist, revisit both K and the split. The asymmetric case (sub-only or like-only topics, where the "durable then fresh" narrative collapses to "5 of one kind") is also part of that revisit — the LLM prompt template will need a `provenance_shape` branch and the right shape is empirical, not first-principles. Tracked for the prompting-pipeline design session (separate scope).
+
 ## Recency decay (decided 2026-04-14)
 
 Like timestamps decay exponentially with a **90-day half-life**, no hard cutoff. The decayed weight feeds into recent TF (§Aggregation).
@@ -263,7 +359,11 @@ Like timestamps decay exponentially with a **90-day half-life**, no hard cutoff.
 RECENT_HALF_LIFE_DAYS = 90
 
 def decayed_weight(liked_at: datetime, now: datetime) -> float:
-    age_days = (now - liked_at).days
+    # Fractional days for sub-day precision; max(0, ...) clamps clock-skew /
+    # timezone artifacts where liked_at > now would yield negative age and
+    # weight > 1.0, violating the [0, 1] weight invariant assumed by the α-blend
+    # and the total_recent_weight confidence signal.
+    age_days = max(0.0, (now - liked_at).total_seconds() / 86400.0)
     return math.exp(-age_days * math.log(2) / RECENT_HALF_LIFE_DAYS)
 ```
 
@@ -293,11 +393,21 @@ BLEND_HALF_SATURATION_K = 5.0     # tunable; "W at which recent and long-term we
 W = stats["total_recent_weight"]  # unbounded, ≥ 0
 α = W / (W + BLEND_HALF_SATURATION_K)
 
+combined = {}
 for T in (long_term_topic_scores.keys() | recent_topic_scores.keys()):
     combined[T] = (1 - α) * long_term.get(T, 0.0) + α * recent.get(T, 0.0)
+
+# Safety-net L1 renormalize (added 2026-04-15). When both windows are non-empty
+# the sum is already 1 (convex combination of two L1 distributions on a topic
+# union). When one window is empty the sum is α or (1-α), not 1. Renormalize
+# unconditionally so the "all topic dicts are L1" invariant holds regardless
+# of which window contributed — costs nothing in the both-non-empty case.
+s = sum(combined.values())
+if s > 0:
+    combined = {T: v / s for T, v in combined.items()}
 ```
 
-`combined` is L1-normalized as a side-effect of blending two already-L1-normalized distributions with convex weights (sums to 1 when both windows non-empty; sums to `(1-α)` or `α` when one side is empty — re-normalize in that edge case).
+`combined` is L1-normalized in all cases by the safety-net step. (Pre-renormalize sums: 1 when both windows non-empty; `α` when long-term empty; `(1-α)` when recent empty; 0 when both empty → returns `{}`.)
 
 **α-curve at a glance (`k=5`):**
 
@@ -322,13 +432,21 @@ for T in (long_term_topic_scores.keys() | recent_topic_scores.keys()):
 `pitch()` is a two-step pipeline: a deterministic algo step assembles candidates, then a bounded LLM call articulates them into `Pitch` objects. Ordering, knobs, and LLM input shape are fixed here so `Pitch` generation doesn't drift across sessions.
 
 ```python
-def pitch(brief: Brief, memory: AgentMemory, profile: InterestProfile) -> list[Pitch]:
+def pitch(brief: Brief, memory: AgentMemory, profile: InterestProfile,
+          user_id: str) -> list[Pitch]:
+    # ── Empty-profile thin-signal short-circuit ──
+    if not profile["combined_topic_scores"]:
+        return [thin_signal_pitch(profile)]   # exactly 1 pitch; see §Output contract
+
     # ── Step 1: algo — candidate assembly (deterministic) ──
     score = {
         T: profile["combined_topic_scores"][T] * memory.topic_multiplier.get(T, 1.0)
         for T in profile["combined_topic_scores"]
     }
-    candidates = top_n(score, n=8)   # ~2× the eventual 3–5 pitch budget
+    # top_n_seeded: returns min(n, len(score)) items; ties resolved by
+    # random.Random((user_id, profile["computed_at"])).shuffle for
+    # deterministic-per-(user, generation) variety without flapping unit tests.
+    candidates = top_n_seeded(score, n=8, seed=(user_id, profile["computed_at"]))
     bundle = [
         {
             "topic": T,
@@ -355,7 +473,7 @@ def pitch(brief: Brief, memory: AgentMemory, profile: InterestProfile) -> list[P
 
 - **Input-bounded.** Candidates bundle + brief. **No external search, no web fetch, no agentic loop.** Content discovery (fresh articles, new videos, world news) is Producer's job, not the agent's. The agent knows the user; Producer knows the world.
 - **Constraint: pick from the candidate set.** The LLM re-ranks, writes hooks, and selects 3–5, but cannot invent topics outside `bundle`. Otherwise the algo layer is decorative and the deterministic demo beat is undermined.
-- **Output contract.** 3–5 `Pitch` objects with `title`, `hook`, `priority ∈ [0, 1]`, `source_refs` (channel_ids / video_ids drawn from the topic's provenance).
+- **Output contract (clarified 2026-04-15).** Either **3–5 topic `Pitch` objects** with `title`, `hook`, `priority ∈ [0, 1]`, `source_refs` (channel_ids / video_ids drawn from the topic's provenance), **or exactly 1 thin-signal `Pitch`** when `combined_topic_scores` is empty (zero-subs zero-likes user, or first-ever episode where API failure left `profile_state` empty). **Never any other cardinality.** Producer is responsible for handling the 1-pitch thin-signal case in its running-order assembly (e.g., let other agents fill the slot, or play a "let me learn about you" segment).
 
 **Why this split:**
 
@@ -368,7 +486,7 @@ def pitch(brief: Brief, memory: AgentMemory, profile: InterestProfile) -> list[P
 **Thin-signal handling.** Without watch history the profile leans on subs (long-term only) + likes (sparse — dev has 77 likes across 8 years). Two thin-signal modes the algo step must tolerate:
 
 - **Sparse `recent_topic_scores`.** `stats.total_recent_weight` surfaces signal richness; the blend's saturating α already collapses the recent window's influence when `W` is small (W=0.1 → α=0.02 ≈ pure long-term). The LLM bundle still includes the (mostly-empty) `recent` field per topic; LLM is instructed to reach for `subscribed_at` from provenance for any recency-adjacent narrative when `recent` is empty.
-- **Empty recent window** (zero-likes user, or first-ever episode with API failure leaving `profile_state` empty). `recent_topic_scores = {}`, `combined_topic_scores` reduces to long-term-only. `pitch()` proceeds against `long_term` alone; if `long_term` is also empty, `pitch()` emits a single thin-signal notice pitch rather than guessing. After Episode 1, in-app `/react` signals carry recency weight via `memory.topic_multiplier` regardless — for returning users, thin-profile is self-correcting.
+- **Empty recent window** (zero-likes user, or first-ever episode with API failure leaving `profile_state` empty). `recent_topic_scores = {}`, `combined_topic_scores` reduces to long-term-only. `pitch()` proceeds against `long_term` alone; if `long_term` is also empty (`combined_topic_scores == {}`), the empty-profile short-circuit at the top of `pitch()` emits a single thin-signal `Pitch` rather than guessing — see §Output contract for the cardinality contract. After Episode 1, in-app `/react` signals carry recency weight via `memory.topic_multiplier` regardless — for returning users, thin-profile is self-correcting.
 
 ## Memory boundary (decided 2026-04-15, revised for write-through)
 
@@ -395,7 +513,7 @@ def pitch(brief: Brief, memory: AgentMemory, profile: InterestProfile) -> list[P
 
 **Parked for v1+ (requires real benchmark):** LLM-assisted memory updates as an A/B against the deterministic baseline. Needs ground truth (user metrics like retention, completion rate) and an eval harness before the comparison is meaningful — without those, "benchmark later" becomes vapor.
 
-**Protocol implication, deferred:** whether the `DataAgent.observe()` method stays on the protocol as a thin pass-through to `learning-loop.record_signals()`, or is dropped entirely in favor of learning-loop consuming session signals directly, is tracked in `learning-loop/docs/DESIGN.md`. This doc commits only to the semantic split above.
+**`DataAgent.observe()` is dropped from the protocol (decided 2026-04-15).** Learning-loop consumes `EpisodeSignals` directly from api-storage at session-end (see §`AgentMemory` schema → §`EpisodeSignals` companion schema for the shape). Field ownership forbids agents from writing `topic_multiplier` — an `observe()` that cannot write the only signal-derived field has no job. Centralizing rule application in learning-loop keeps policy in one place rather than scattered across four agent files. `agents/docs/DESIGN.md` `DataAgent` protocol is updated accordingly. If an agent ever needs signal-derived state that is *not* a topic multiplier (e.g., per-channel engagement counts), `observe()` can return as an agent-owned write path on an agent-owned field, not as a learning-loop hook.
 
 ## Topic tagging (decided, extended 2026-04-14)
 
@@ -436,11 +554,40 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
 | User OAuth `youtube.readonly`         | v0 + v1 | Fetch user's subs + liked videos via YouTube Data API v3            |
 | Server API key (developer credential) | v0 + v1 | `channels.list?part=topicDetails` for any channel (public metadata) |
 
-**One consent prompt, one scope, one API, globally available.** No regional gating, no async archive, no upload, no verification gate (`youtube.readonly` is a common non-sensitive scope — app verification is still required for >100 users in production but is straightforward).
+**One consent prompt, one scope, one API, globally available.** No regional gating, no async archive, no upload, no verification gate (`youtube.readonly` is a common non-sensitive scope). **Project scope is internal hackathon, solo-dev** — Google's app verification (paperwork required at >100 users in production) is **out of v0/v1 scope and not on the critical path**. Testing-mode publishing covers the demo audience (dev + Alice + a handful of invited testers, all explicitly added as test users in the OAuth consent screen).
 
 **Token lifecycle (v0 scope):** one consent at OAuth flow start yields an access token (~1h) + refresh token. Access tokens silently rotate via refresh — no user re-prompt per episode. Relevant only for the 10-min demo window: one consent at session start covers everything. Dev-time caveat: while the OAuth consent screen is in Google's Testing publishing status, refresh tokens expire after 7 days, so the dev account re-consents weekly. Production-scale lifecycle (revocation, multi-device, long-lived storage) is deferred to v1; `youtube.readonly` testing-mode supports several users which covers v0 (dev + Alice + a handful of invited testers), and Google app verification (privacy policy, scope justification, demo video) is only required at the >100-user production threshold.
 
-**Alice's one-time profile:** same probe script run against Alice's account at Day 0, with the resulting JSON responses committed as his static input (not his OAuth token). No live OAuth for Alice's agent at runtime. Consent captured verbally from Alice for demo-day use; if his taste evolves between demos, re-run the probe against his account (one-time re-consent).
+**Alice's one-time profile:** same probe script run against Alice's account at Day 0, with the resulting JSON responses committed as his static input (not his OAuth token). No live OAuth for Alice's agent at runtime. Consent captured verbally from Alice for demo-day use. **Demo-day prep (2026-04-15):** re-probe Alice's account ~24 hours before showtime — single OAuth re-consent + run probe script + commit fresh JSON to `agents/alices/data/`. Keeps his profile reflective of his current taste (avoids the "frozen-creator vs. live-user" mismatch that would otherwise compound over weeks). If his taste evolves between demos beyond the 24h window, re-run on demand.
+
+## `fetch_context()` failure handling (decided 2026-04-15)
+
+`fetch_context()` is the only network-touching boundary in `agents/youtube`. The "no-op write on failure" rule from §Two-layer architecture is the *outer* envelope — a fetch that ultimately fails leaves `memory.profile_state` untouched and the prior profile is reused. This section specifies the *inner* retry/refresh behavior per error class so failures are handled honestly per type, not silently lumped into one bucket.
+
+**Per-call timeout:** 5 seconds per HTTP request. **Total `fetch_context()` deadline:** 15 seconds (set in §Two-layer architecture). When the total deadline fires, abandon any in-flight requests, skip the write, return the prior `profile_state`. Player keeps streaming the default music bed during the window.
+
+| HTTP status / error reason                              | Class                  | Action                                                                                                                                                       |
+| ------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `401 Unauthorized` (expired access token)               | Recoverable in-session | Refresh access token via stored refresh token, retry the request **once**. If refresh itself returns `invalid_grant`, treat as re-consent needed (row below). |
+| `403 quotaExceeded` / `dailyLimitExceeded`              | Recoverable tomorrow   | No retry. Skip write. Log the quota-exhaustion event for ops visibility.                                                                                     |
+| `403 rateLimitExceeded` / `userRateLimitExceeded`       | Recoverable shortly    | Exponential backoff (1s, 2s, 4s), retry up to 3 times within the 15s deadline.                                                                               |
+| `403 accessNotConfigured` / `forbidden` (scope/API off) | Unrecoverable          | No retry. Fail loud in dev (raise / log error). v1+ surfaces to ops dashboard.                                                                               |
+| `404` (`channelNotFound`, `playlistNotFound`, etc.)     | Per-entity miss        | Log + skip the affected entity. Continue the overall fetch. Affected topics simply don't get a contributor from that entity (lowers `tag_coverage_pct`).      |
+| `429 Too Many Requests`                                 | Recoverable shortly    | Same as `403 rateLimitExceeded`: backoff + retry up to 3 within deadline.                                                                                    |
+| `5xx` (500/502/503/504)                                 | Transient backend      | Exponential backoff (1s, 2s, 4s), retry up to 3 times within deadline.                                                                                       |
+| Network timeout (no response within per-call timeout)   | Transient              | Retry once. If still timeout, treat as failure and skip write.                                                                                               |
+| `invalid_grant` on refresh                              | Re-consent needed      | Token chain is dead. v0: log + skip write (user keeps prior profile until they manually re-consent). v1+: surface re-consent UI.                             |
+
+**Refresh token expiry caveat (v0 dev mode).** While the OAuth consent screen is in Google's Testing publishing status, refresh tokens expire after **7 days** — so the 401-then-refresh path will get `invalid_grant` instead of a fresh access token after that window. Handled per the `invalid_grant` row above. Demo-day prep includes re-consenting all test users within 24h of showtime (see §Auth model summary, §Build plan).
+
+**Why the matrix matters.** "No-op on failure" is the right outer rule, but treating a recoverable 401 the same as an unrecoverable `accessNotConfigured` would mean a routine token expiry silently degrades a user's profile for an entire session with no signal that anything went wrong. The matrix keeps recoverable paths recovering and unrecoverable paths loud — fail-graceful at the outer envelope, fail-honest in the inner mechanism.
+
+**v0 multi-writer note (parked):** v0 demo is single-user, single-process, sequential user actions (click → wait → listen → react → next), so two `fetch_context()` calls cannot race. Concurrency control (CAS on `updated_at`, per-(user_id, agent_id) lock around `fetch_context()`) is a v1+ concern when retries / scheduled refresh / multi-tab usage become real.
+
+**Sources for error classification:**
+- [YouTube Data API — Errors | Google for Developers](https://developers.google.com/youtube/v3/docs/errors)
+- [Global domain errors | YouTube Data API](https://developers.google.com/youtube/v3/docs/core_errors)
+- [OAuth 2.0 for Mobile & Desktop Apps — refresh token expiration](https://developers.google.com/youtube/v3/guides/auth/installed-apps)
 
 ## Data retention (v0 scope, 2026-04-15)
 
@@ -455,29 +602,6 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
 **No app-level token encryption in v0.** Threat model is small: `youtube.readonly` is a read-only non-sensitive scope; tokens sit on the dev machine behind FileVault (or equivalent disk encryption); `.gitignore` prevents commit; no hosted DB or non-dev users exist yet. Adding Fernet-style symmetric encryption here would be throwaway work — the v1 solution (KMS-backed, for a real hosted DB with real users) wouldn't reuse it. Revisit encryption posture when v1 introduces hosted storage.
 
 **User-delete endpoint** is **not built for v0** — demo-scale, known users. For v1 public scope: cascade-delete tokens + `AgentMemory` on request; tag cache survives (not PII). See §V1+ open questions.
-
-## Key decisions scoped through 2026-04-14 brainstorming
-
-| #   | Decision                                                          | Chosen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Alternatives rejected                                                                                                                                                                                                                                                                                                                                                                      |
-| --- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | Design scope                                                      | v0 demo = v1's simplified skeleton (Option B from brainstorm)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | v0 as disposable shortcut (C); v0 as demo-only (A)                                                                                                                                                                                                                                                                                                                                         |
-| 2   | Acquisition layer                                                 | **YouTube Data API v3, user OAuth `youtube.readonly`.** Single scope, synchronous, globally available.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | DPAPI (US unavailable, async, verification gate); Manual Takeout upload (unacceptable consumer onboarding friction); Channel-handle paste (no recency)                                                                                                                                                                                                                                     |
-| 3   | Fields consumed                                                   | `subscriptions.list` (+ subscribe dates), `playlistItems.list?playlistId=LL` (+ like dates + video_ids), `channels.list?part=topicDetails` (for subs), `videos.list?part=topicDetails` (for likes — **per-video tagging**)                                                                                                                                                                                                                                                                                                                                                    | Activities API (empty of taste signals); Watch Later / Watch History (dead); Custom playlists (v1 fast-follow)                                                                                                                                                                                                                                                                             |
-| 3b  | Shared extractor                                                  | Pure function `extract_profile(subs, likes, channel_topics, video_topics, now) -> InterestProfile`, shared by `youtube_agent` and `alices_agent`                                                                                                                                                                                                                                                                                                                                                                                                                            | Duplicate per-agent extraction; per-agent ad-hoc logic                                                                                                                                                                                                                                                                                                                                     |
-| 3c  | Profile entity set                                                | Union of subscribed channels + liked videos. Contributes to `N` for IDF calculation. Likes add drive-by interest surface not covered by subs.                                                                                                                                                                                                                                                                                                                                                                                                                                 | Subs-only (loses drive-by interest); Likes-only (loses baseline taste)                                                                                                                                                                                                                                                                                                                     |
-| 4   | Profile architecture                                              | Two layers: `InterestProfile` (in `ScopeContext`) + `AgentMemory` (from signals)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Single unified memory; profile only                                                                                                                                                                                                                                                                                                                                                        |
-| 5   | ~~Profile shape~~ **SUPERSEDED by #10** (2026-04-14)              | ~~Flat with two time windows (long-term + recent × entity + topic)~~ → Topics-only, two L1-normalized windows + shared provenance.                                                                                                                                                                                                                                                                                                                                                                                                                                            | See #10 below.                                                                                                                                                                                                                                                                                                                                                                             |
-| 6   | Topic tagging                                                     | `topicCategories` (channel-level for subs) + `topicDetails` (per-video for likes). 100% coverage on probe for channels; per-video coverage TBV Day 2. LLM fallback deferred to fast-follow.                                                                                                                                                                                                                                                                                                                                                                                   | Pure LLM-per-channel; fixed taxonomy; skip topics; hand-tagged; channel-level tagging for liked videos (loses drive-by genre granularity)                                                                                                                                                                                                                                                  |
-| 7   | Build order                                                       | Design YouTube first (highest risk); build skeleton-first per master plan                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Build YouTube first                                                                                                                                                                                                                                                                                                                                                                        |
-| 8   | Recency decay on likes                                            | **Exponential decay on like timestamps, 90-day half-life, no hard cutoff.** Single knob `RECENT_HALF_LIFE_DAYS=90`. Decayed weights feed `tf_recent[T]` per §Aggregation (was `recent_entity_scores` in pre-pivot shape).                                                                                                                                                                                                                                                                                                                                                     | Piecewise tiered buckets (no benefit for LLM consumer vs. single exponential knob); hard cutoff (unnecessary — exponential decays to ~0); raw timestamps (breaks aggregation math); 30/60d (leaves `recent` near-empty); 180d (blurs into long-term); per-signal half-lives (only one decaying signal type)                                                                                |
-| 9   | ~~Long-term score assignment~~ **SUPERSEDED by #10** (2026-04-14) | ~~Flat 1.0 per subscribed channel + `subscribe_dates` field~~ → Flat 1.0 TF per sub still holds, but fed into topic-level TF-IDF, not channel-level entity scores. Subscribe dates now live in `topic_provenance[T][i].subscribed_at`.                                                                                                                                                                                                                                                                                                                                        | See #10 below.                                                                                                                                                                                                                                                                                                                                                                             |
-| 10  | **Entity-as-topic pivot**                                         | **Topics are the only scored dimension in `InterestProfile`.** Channels and videos live in `topic_provenance` as evidence, not as scored entities. The YouTube agent pitches topic-based segments, so ranking at the topic layer aligns with the consumer. Drops `long_term_entity_scores`, `recent_entity_scores`, `subscribe_dates` as separate fields; all absorbed into topic scores + provenance.                                                                                                                                                                        | Keep channel-entity scoring alongside topic scoring (dead weight — `pitch()` doesn't consume channel scores); per-channel scoring with topic rollup at pitch time (pushes work downstream, no benefit); drop topics entirely and pitch by channel (breaks the topic-segment premise)                                                                                                       |
-| 11  | **Aggregation**                                                   | **TF-IDF with sublinear TF + shared user-IDF + L1 per window.** TF = flat 1.0 per sub (long-term) / decayed weight per like (recent). Document set for IDF = subs ∪ liked videos. Sublinear scaling `1 + log(tf)` dampens single-source spikes. L1 per window enables temporal comparison (`recent["jazz"] > long_term["jazz"]` = unit-consistent claim). Handles broad-term pollution automatically (lifestyle: idf ≈ 1.05 vs. rare topic: idf ≈ 3.0).                                                                                                                       | Split-equal (sensitive to topic-list length noise); no normalization (incommensurable cross-window magnitudes, temporal comparison impossible); max-norm (loses fraction-of-attention interpretation); per-window IDF (flips topic informativeness based on viewing lens — noise); BM25 (overkill for LLM consumer, extra knobs without benefit — parked for v1+ if quality issues emerge) |
-| 12  | **Provenance compression**                                        | **K=5 contributors per topic**, selected as up to 2 oldest subs (by `subscribed_at` asc) + up to 3 newest likes (by `liked_at` desc), filled from the other side if short. Built at profile-construction time so profile is drop-in LLM context. Subs-first-then-likes ordering surfaces durable voice before recent voice.                                                                                                                                                                                                                                                   | No cap (prompt bloat: ~1000+ contributors on broad topics); pitch-time selection (makes `pitch()` not-dumb); top-K by raw score (loses the durable/fresh narrative split); larger K (marginal benefit, linear prompt-cost growth)                                                                                                                                                          |
-| 13  | **Blend formula (2026-04-15)**                                    | **Saturating blend `α = W / (W + k)` with `k = 5`, W = `stats.total_recent_weight`.** Precomputed into `combined_topic_scores` inside `InterestProfile`. Raw `long_term_topic_scores` and `recent_topic_scores` kept alongside so narrative layers can still detect temporal divergence. Decay formula fixed to `exp(-age · ln 2 / HL)` so `RECENT_HALF_LIFE_DAYS` is a true half-life.                                                                                                                                                                                       | Linear blend (requires cap, cliff effects); fixed α (ignores signal richness); threshold blend (binary, loses gradient); blending at pitch-time (policy leaks into pitch layer); collapsing to combined only (destroys temporal-divergence signal for narrative)                                                                                                                           |
-| 14  | **`pitch()` flow (2026-04-15)**                                   | **Two-step: algo candidate assembly (deterministic) → bounded LLM selection + articulation.** Algo = `combined[T] × memory.topic_multiplier[T]`, top-N with `n=8`, bundle with both windows + provenance. LLM picks 3–5 from candidates, writes hooks, sets priority. **No external search in step 2** — content discovery is Producer's job. LLM cannot invent topics outside candidates.                                                                                                                                                                                    | All-LLM (non-determinism, breaks demo beat legibility); all-algo (can't write hooks); LLM with web search (scope creep into Producer's role, cost/latency/failure modes); algo picks final 3–5 (LLM has nothing to select on); no candidate cap (unbounded tokens)                                                                                                                         |
-| 15  | **Memory boundary (2026-04-15, revised)**                         | **Field-level ownership in `AgentMemory`.** `agents/youtube` owns writes to `memory.profile_state` (via `fetch_context()` write-through). `learning-loop` owns all signal-derived writes — `/react` ingestion, update rules, session-end batching, move caps, decay — producing `memory.topic_multiplier`. Neither component reaches into the other's fields. Updates are deterministic (algorithmic rule table), not LLM-driven: reproducibility, testability, cost/latency, auditability all favor algo. LLM-assisted memory updates parked for v1+ pending real benchmark. | Agent owns all writes (conflates agent + learning-loop concerns); learning-loop owns profile writes (couples learning-loop to YouTube extraction — wrong layering); agent purely read-only on memory (blocks write-through, loses fail-graceful path); LLM-driven memory updates in v0; mixed algo+LLM                                                                                     |
-| 16  | **Profile-in-memory write-through (2026-04-15)**                  | **`InterestProfile` is stored inside `AgentMemory` as `profile_state`, overwritten by `fetch_context()` on each successful YouTube fetch.** On API failure, `fetch_context()` skips the write and subsequent `pitch()` serves the last-written profile from memory. One read path, no fallback branch. The no-op-on-failure semantic dissolves both profile-cache-invalidation and quota-exhaustion-path concerns into a single rule.                                                                                                                                         | Snapshot-only sidecar (two read paths, fresh vs. fallback — code smell); source-of-truth memory owning absolute topic scores (reshapes pitch flow and learning-loop rules — deferred to v1+ pending learning-loop design); ephemeral profile + separate persistent cache layer (redundant persistence alongside `AgentMemory`); no persistence at all (episode blocks on any API failure)  |
 
 ## V1+ open questions (parked)
 
@@ -496,7 +620,7 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
 | `agents` (parent)   | `DataAgent` protocol, `Pitch` shape, `Brief` shape                                                                                            | in             |
 | `agents/alices`   | Imports shared extractor — `extract_profile(subs, likes, channel_topics, video_topics, now) -> InterestProfile`                               | out            |
-| `learning-loop`     | `AgentMemory` shape, `EpisodeSignals` shape, `observe()` update rules                                                                         | in             |
+| `learning-loop`     | `AgentMemory` shape, `EpisodeSignals` shape (both locked 2026-04-15, §`AgentMemory` schema); learning-loop owns `topic_multiplier` writes     | in             |
 | `api-storage`       | Persists `AgentMemory` via `agent_memory` table; caches OAuth tokens + topic-tag lookups (`channel_id` / `video_id` → tags)                   | in/out         |
 | `producer`          | Consumes `list[Pitch]`                                                                                                                        | out            |
 | YouTube Data API v3 | `subscriptions.list`, `playlistItems.list` (user OAuth); `channels.list?part=topicDetails` + `videos.list?part=topicDetails` (server API key) | external (out) |
@@ -506,7 +630,7 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
 - **Day 0 (pre-build, completed 2026-04-14):**
   - ✅ Google Cloud project provisioned; YouTube Data API v3 enabled.
   - ✅ OAuth consent screen in testing mode with `youtube.readonly` scope; dev added as test user.
-  - ✅ Desktop OAuth client created; `credentials.json` saved to `tmp/DPAPI/credentials.json` (path inherited from earlier DPAPI experiment; rename later).
+  - ✅ Desktop OAuth client created; `credentials.json` saved to `tmp/DPAPI/credentials.json` (path inherited from earlier DPAPI experiment). **Day 1 cleanup (2026-04-15):** *copy* (do not move/delete the original — old probe scripts may still reference it) the file to a properly-named path like `agents/youtube/secrets/credentials.json` (gitignored) and update new code to read from there. Old path remains as a backwards-compatible shim until all callers migrated.
   - ✅ YouTube Data API probe (`tmp/ydata/youtube_api_probe.py`) run against dev's account. Results saved to `tmp/ydata/probe_1776208130/`. Validated: subs, likes, topicCategories coverage, likes∩subs divergence.
   - **TODO Day 0 — Alice:** run the same probe against Alice's Google account (same OAuth testing-mode client, add Alice as test user). Save responses in the repo as `agents/alices/data/` for Day-4 consumption.
   - Provision dedicated server API key for `topicDetails` lookups (separate from user OAuth).
@@ -521,12 +645,12 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
   - Per-video topicDetails coverage already validated pre-Day-2 (89.6% on dev's 77 liked videos — see §Topic tagging). No LLM fallback needed.
   - Normalize Wikipedia URLs → kebab topic tags (strip parenthetical suffixes, `_` → `-`, lowercase).
   - Apply recency decay to like weights (90-day half-life) before feeding into `tf_recent`.
-  - Compute TF-IDF per window: sublinear TF (`1 + log`), shared user-IDF (`log(N/df)`), L1-normalize each non-empty window.
-  - Build `topic_provenance` with K=5 per-topic cap (up to 2 oldest subs + up to 3 newest likes, filled from other side if short).
+  - Compute TF-IDF per window: sublinear TF `log(1 + tf)`, per-window IDF `log((N_window + 1) / df_window)`, L1-normalize each non-empty window.
+  - Build `topic_provenance` with K=5 per-topic cap (up to 2 oldest subs + up to 3 newest likes, fill continuing in same sort order on the over-supplied side if one side is short).
   - Unit tests lock the extractor contract — future acquisition changes can't drift the profile shape. Fixtures drawn from committed probe JSON.
 - **Day 3 — `pitch()` generation.** Real `pitch()` logic using both profile windows + `AgentMemory`. Priority formula per `agents/docs` Reviewer Concern #1.
 - **Day 4 — `alices_agent`.** Reuse `extract_profile()` on Alice's Day-0 JSON (one-time). Layer persona + content pack + wallet on top. This is the validation that the shared-extractor contract is clean.
-- **Day 5 (stretch, Approach B):** `observe()` wires `/react` signals into memory updates per `learning-loop` rules.
+- **Day 5 — learning-loop wiring (REQUIRED for Episode B demo beat, 2026-04-15).** Learning-loop consumes `EpisodeSignals` at session-end and writes `topic_multiplier` updates per its own rules (§Memory boundary). The demo plays **two episodes**: cold-start (Episode A) and post-learning (Episode B). The Episode-B-shifts beat is the demo's proof point that the learning loop is real, so this day is **non-negotiable, not stretch**. If learning-loop slips, Episode B looks identical to Episode A and the demo silently loses its core narrative.
 
 ## Success criteria
 
@@ -536,7 +660,7 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
 - **TF-IDF shape is sensible:** broad tags (`lifestyle`, `entertainment`) rank lower than genre-specific tags despite higher raw frequency. Spot-check on dev's data: any `lifestyle`-heavy channel's genre-specific co-tags rank above `lifestyle` in the topic dict.
 - **Temporal comparison is visible:** for at least one topic where recent likes concentrate (e.g., a genre the user has been exploring lately), `recent_topic_scores[T] > long_term_topic_scores[T]`. Inverse holds for a topic with many old subs but no recent likes.
 - **Provenance is LLM-ready:** for any topic `T` with score > 0, `topic_provenance[T]` has 1–5 contributors with fully-populated fields (all required fields present, `kind`-discriminated optional fields correctly set).
-- `pitch()` emits 3–5 valid `Pitch` objects on real data (no mocks), priority ∈ [0, 1].
+- `pitch()` emits 3–5 valid `Pitch` objects on real data (no mocks) with priority ∈ [0, 1], **or** exactly 1 thin-signal `Pitch` when `combined_topic_scores == {}` per the §`pitch()` flow output contract.
 - Profile fits the `DataAgent` protocol — no agent-specific escape hatches into Producer.
 - `alices_agent` successfully constructs its profile by calling the shared extractor on committed Day-0 JSON.
 
