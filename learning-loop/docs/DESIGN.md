@@ -1,6 +1,6 @@
 # Component: `learning-loop`
 
-**Status:** DRAFT (component extract from master design)
+**Status:** DRAFT — **STALE SCHEMA (2026-04-16).** This doc uses the pre-2026-04-15 memory shape (`entity_scores`, `topic_scores`, `signal_weights`) which is superseded by `agents/youtube/docs/DESIGN.md` §`AgentMemory` schema (locked 2026-04-15). The locked shape uses `profile_state: InterestProfile` + `topic_multiplier: dict[str, float]`. `observe()` was dropped from the `DataAgent` protocol — learning-loop consumes `EpisodeSignals` directly from api-storage. **This doc needs a redesign pass against the locked contract before implementation.** (Component extract from master design)
 **Master doc:** [`~/.gstack/projects/bigbowlz-ai-audio-experience-social-platform/wanlizhou-main-design-20260413-182237.md`](../../../../.gstack/projects/bigbowlz-ai-audio-experience-social-platform/wanlizhou-main-design-20260413-182237.md) — canonical source.
 **Reviewed:** 2026-04-13 (spec review 6/10, red-team)
 

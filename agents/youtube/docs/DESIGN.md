@@ -636,7 +636,8 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
   - Provision dedicated server API key for `topicDetails` lookups (separate from user OAuth).
 - **Day 1 — scaffold + lock extractor contract.**
   - Move the probe script into the repo proper (`scripts/youtube_api_probe.py` or `agents/youtube/scripts/probe.py`). Commit Day-0 JSON as a regression fixture for extractor testing.
-  - Scaffold `DataAgent` protocol for `youtube_agent`; `fetch_context()` returns a stub `InterestProfile` built from the committed probe JSON; `pitch()` emits placeholder `Pitch` from first entity.
+  - Scaffold `DataAgent` protocol for `youtube_agent`; `fetch_context(user_id)` returns a stub `InterestProfile` built from the committed probe JSON; `pitch()` emits placeholder `Pitch` from first entity.
+  - **Template hook stub:** implement `pitch()` with deterministic template hooks (e.g., "You've been subscribed to {channel} since {date}") so the pipeline works end-to-end without an LLM call. Day 3 replaces templates with LLM hooks. Templates remain as fallback if Day 3's LLM integration slips.
   - Integrates with calendar + weather agents to prove protocol works end-to-end via CLI.
 - **Day 2 — extraction pipeline (shared with `alices_agent`).**
   - Build `agents/youtube/extractor.py` as a pure function: `extract_profile(subs, likes, channel_topics, video_topics, now) -> InterestProfile`. No I/O, no OAuth, no API calls.
@@ -648,7 +649,7 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
   - Compute TF-IDF per window: sublinear TF `log(1 + tf)`, per-window IDF `log((N_window + 1) / df_window)`, L1-normalize each non-empty window.
   - Build `topic_provenance` with K=5 per-topic cap (up to 2 oldest subs + up to 3 newest likes, fill continuing in same sort order on the over-supplied side if one side is short).
   - Unit tests lock the extractor contract — future acquisition changes can't drift the profile shape. Fixtures drawn from committed probe JSON.
-- **Day 3 — `pitch()` generation.** Real `pitch()` logic using both profile windows + `AgentMemory`. Priority formula per `agents/docs` Reviewer Concern #1.
+- **Day 3 — `pitch()` generation.** Real `pitch()` logic using both profile windows + `AgentMemory`. Priority formula per `agents/docs` Reviewer Concern #1. Replace Day 1's template hooks with LLM-generated hooks constrained by `claim_kind` + `provenance_shape` (see `agents/docs/prompt_design.md` §1–§2). Unit tests for `compute_claim_kind()`, `compute_provenance_shape()`, and `select_segments()` must pass before the LLM prompt step is built (see prompt_design.md §Test mandate).
 - **Day 4 — `alices_agent`.** Reuse `extract_profile()` on Alice's Day-0 JSON (one-time). Layer persona + content pack + wallet on top. This is the validation that the shared-extractor contract is clean.
 - **Day 5 — learning-loop wiring (REQUIRED for Episode B demo beat, 2026-04-15).** Learning-loop consumes `EpisodeSignals` at session-end and writes `topic_multiplier` updates per its own rules (§Memory boundary). The demo plays **two episodes**: cold-start (Episode A) and post-learning (Episode B). The Episode-B-shifts beat is the demo's proof point that the learning loop is real, so this day is **non-negotiable, not stretch**. If learning-loop slips, Episode B looks identical to Episode A and the demo silently loses its core narrative.
 
