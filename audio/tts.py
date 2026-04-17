@@ -90,7 +90,7 @@ class TTSClient:
 
         # Call ElevenLabs batch API (sync SDK call run in executor)
         start = time.monotonic()
-        audio_chunks = await asyncio.get_event_loop().run_in_executor(
+        audio_chunks = await asyncio.get_running_loop().run_in_executor(
             None,
             lambda: self._client.text_to_speech.convert(
                 voice_id=voice_id,

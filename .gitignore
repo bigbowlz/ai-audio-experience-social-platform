@@ -5,3 +5,5 @@ course.md
 **/venv/
 **/__pycache__/
 .claude/*
+data/
+exports/
