@@ -146,7 +146,7 @@ WMO_CONDITIONS = {
 ```python
 class WeatherFact(TypedDict):
     category: str          # "uv" | "wind" | "temperature" | "precipitation" | "air_quality" | "visibility"
-    summary: str           # "UV index peaks at 8 (very high) around 1pm"
+    summary: str           # "UV index peaks at 8 (very high) around 13:00"
     severity: str          # "info" | "notable" | "warning"
     hour: int | None       # hour of peak relevance, if applicable
 
@@ -193,7 +193,7 @@ class WeatherScopeContext(TypedDict):
     current: CurrentConditions
     hourly_forecast: list[HourlyForecast]  # next 24h from current hour
     daily: DailySummary
-    air_quality: AirQuality
+    air_quality: AirQuality | None    # None when AQ fetch fails; see Fallback Behavior table
     notable_facts: list[WeatherFact]  # top 3 most interesting observations
     location_name: str                # "San Francisco, CA" or similar
     fetched_at: str                   # ISO 8601 timestamp
@@ -222,9 +222,9 @@ Deterministic function, no LLM. Takes weather data, outputs a 2-3 sentence summa
 **Sort order** (fully deterministic): severity (warning > notable > info), then specificity (has specific hour > general), then category in canonical order: precipitation > uv > wind > temperature > air_quality > visibility.
 
 **Example:**
-- Input: temp 22C, UV 8 at 1pm, rain 70% at 5pm, AQI 35, wind 15 km/h
-- Notable facts: [UV very high at 1pm, rain likely at 5pm, temp comfortable at 22C]
-- Narrative: "Currently 22C and sunny. UV peaks at 8 around 1pm, so sunscreen's a good call. Rain rolls in around 5pm with a 70% chance. Otherwise mild with light winds."
+- Input: temp 22C, UV 8 at 13:00, rain 70% at 17:00, AQI 35, wind 15 km/h
+- Notable facts: [UV very high at 13:00, rain likely at 17:00, temp comfortable at 22C]
+- Narrative: "Currently 22C and sunny. UV peaks at 8 around 13:00, so sunscreen's a good call. Rain rolls in around 17:00 with a 70% chance. Otherwise mild with light winds."
 
 ## Pitch Generation
 
@@ -315,7 +315,7 @@ The orchestrator copies `WeatherScopeContext["weather_summary"]` into `Brief.tod
 
 ## Open Questions
 
-1. **Timezone handling.** Open-Meteo's `timezone=auto` returns local times. Verify that hourly data aligns with user's local clock for "rain at 3pm" statements.
+1. **Timezone handling.** Open-Meteo's `timezone=auto` returns local times. Verify that hourly data aligns with user's local clock for "rain at 15:00" statements.
 2. **Approach C upgrade path.** Weather event classification (`weather_arc`, `weather_event_type`) is a natural v1 extension. The `notable_facts` infrastructure is the foundation for C's event classifier.
 
 ## Deferred to v1
