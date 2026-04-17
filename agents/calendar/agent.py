@@ -1,7 +1,8 @@
 """CalendarAgent: today's Google Calendar events via OAuth 2.0.
 
-v0 (demo): Live Google Calendar API, deterministic template pitch.
-Token lifecycle: scripts/calendar_auth.py for setup, auto-refresh at runtime.
+v0 (demo): Live Google Calendar API. Pitch carries raw rich event data
+for the Producer LLM — no taste logic here.
+Token lifecycle: auth/calendar_auth.py for setup, auto-refresh at runtime.
 
 Spec: agents/calendar/docs/DESIGN.md
 """
@@ -10,7 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,7 @@ MAX_EVENTS = 20
 
 
 def _list_events(credentials: Any) -> list[dict] | None:
-    """Fetch today's events from Google Calendar API.
+    """Fetch events in the next 16 hours from Google Calendar API.
 
     Returns list of event dicts on success, None on auth/network failure.
     This is the single mock boundary for tests.
@@ -43,15 +44,14 @@ def _list_events(credentials: Any) -> list[dict] | None:
         service = build("calendar", "v3", credentials=credentials)
 
         now = datetime.now(timezone.utc)
-        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
+        window_end = now + timedelta(hours=16)
 
         result = (
             service.events()
             .list(
                 calendarId="primary",
-                timeMin=start_of_day.isoformat(),
-                timeMax=end_of_day.isoformat(),
+                timeMin=now.isoformat(),
+                timeMax=window_end.isoformat(),
                 maxResults=MAX_EVENTS,
                 singleEvents=True,
                 orderBy="startTime",
@@ -61,8 +61,8 @@ def _list_events(credentials: Any) -> list[dict] | None:
 
         events = result.get("items", [])
         return [e for e in events if e.get("status") != "cancelled"]
-    except Exception:
-        log.exception("Google Calendar API call failed")
+    except Exception as e:
+        log.warning("Google Calendar API call failed: %s", e)
         return None
 
 
@@ -83,6 +83,7 @@ def _load_credentials() -> Any | None:
         from google.oauth2.credentials import Credentials
 
         data = json.loads(TOKEN_PATH.read_text())
+        expiry_str = data.get("expiry")
         creds = Credentials(
             token=data.get("token"),
             refresh_token=data.get("refresh_token"),
@@ -90,17 +91,18 @@ def _load_credentials() -> Any | None:
             client_id=data.get("client_id"),
             client_secret=data.get("client_secret"),
             scopes=data.get("scopes"),
+            expiry=datetime.fromisoformat(expiry_str) if expiry_str else None,
         )
 
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            # Persist refreshed token
             data["token"] = creds.token
+            data["expiry"] = creds.expiry.isoformat() if creds.expiry else None
             TOKEN_PATH.write_text(json.dumps(data))
 
         return creds
-    except Exception:
-        log.exception("Failed to load/refresh calendar credentials")
+    except Exception as e:
+        log.warning("Failed to load/refresh calendar credentials: %s", e)
         return None
 
 
@@ -108,9 +110,9 @@ def _load_credentials() -> Any | None:
 
 
 def _parse_time(dt_str: str) -> str:
-    """Parse RFC3339 datetime to HH:MM string."""
+    """Parse RFC3339 datetime to 24-hour time string (e.g. '10:00', '14:30')."""
     dt = datetime.fromisoformat(dt_str)
-    return dt.strftime("%H:%M")
+    return f"{dt.hour:02d}:{dt.minute:02d}"
 
 
 def _parse_duration_min(start_str: str, end_str: str) -> int:
@@ -236,7 +238,7 @@ class CalendarAgent:
         context: ScopeContext,
         user_id: str,
     ) -> list[Pitch]:
-        """Emit 1 schedule-context pitch with template hooks.
+        """Emit 1 schedule-context pitch carrying raw rich event data.
 
         Priority scales by event count:
           0 events  -> 0.50
@@ -244,50 +246,28 @@ class CalendarAgent:
           4-6       -> 0.60
           7+        -> 0.65
         """
-        api_reachable = context.get("api_reachable", True)  # type: ignore[call-overload]
+        api_reachable: bool = context.get("api_reachable", True)  # type: ignore[call-overload]
         rich_events: list[dict] = context.get("calendar_events_rich") or []  # type: ignore[call-overload]
-
-        if not api_reachable:
-            return [
-                Pitch(
-                    agent="calendar",
-                    title="Calendar unavailable",
-                    hook="Couldn't reach your calendar today.",
-                    rationale="Google Calendar API unreachable.",
-                    source_refs=[],
-                    priority=0.5,
-                    thin_signal=False,
-                    claim_kind="neutral",
-                    provenance_shape="balanced",
-                )
-            ]
-
         n = len(rich_events)
 
-        if n == 0:
-            return [
-                Pitch(
-                    agent="calendar",
-                    title="Open day",
-                    hook="Your calendar is clear today — wide open from morning to night.",
-                    rationale="Calendar: 0 events today.",
-                    source_refs=[],
-                    priority=0.5,
-                    thin_signal=False,
-                    claim_kind="neutral",
-                    provenance_shape="balanced",
-                )
-            ]
-
-        hook = _build_hook(rich_events)
-        priority = _priority_for_count(n)
+        if not api_reachable:
+            priority = 0.5
+        elif n == 0:
+            priority = 0.5
+        elif n <= 3:
+            priority = 0.55
+        elif n <= 6:
+            priority = 0.60
+        else:
+            priority = 0.65
 
         return [
             Pitch(
                 agent="calendar",
                 title="Today's schedule",
-                hook=hook,
-                rationale=f"Calendar: {n} event(s) today.",
+                hook=f"{n} calendar events today" if api_reachable else "Calendar unavailable",
+                data={"api_reachable": api_reachable, "events": rich_events},
+                rationale=f"Calendar: {n} event(s) today." if api_reachable else "Google Calendar API unreachable.",
                 source_refs=[],
                 priority=priority,
                 thin_signal=False,
@@ -295,71 +275,3 @@ class CalendarAgent:
                 provenance_shape="balanced",
             )
         ]
-
-
-# ── Template hook builder ────────────────────────────────────────────
-
-
-def _priority_for_count(n: int) -> float:
-    """Map event count to priority."""
-    if n <= 3:
-        return 0.55
-    if n <= 6:
-        return 0.60
-    return 0.65
-
-
-def _build_hook(events: list[dict]) -> str:
-    """Build a conversational template hook from rich event data."""
-    n = len(events)
-
-    # Count meetings with video calls
-    video_count = sum(1 for e in events if e.get("has_video_call"))
-
-    # Find back-to-back clusters (gap < 15 min)
-    back_to_back = 0
-    for i in range(len(events) - 1):
-        cur_end = events[i].get("end", "")
-        next_start = events[i + 1].get("start", "")
-        if cur_end and next_start and cur_end != "all-day" and next_start != "all-day":
-            try:
-                end_h, end_m = map(int, cur_end.split(":"))
-                start_h, start_m = map(int, next_start.split(":"))
-                gap = (start_h * 60 + start_m) - (end_h * 60 + end_m)
-                if gap < 15:
-                    back_to_back += 1
-            except (ValueError, TypeError):
-                pass
-
-    # Find the last event's end time for "free after X" hooks
-    last_end = None
-    for e in reversed(events):
-        if e.get("end") and e["end"] != "all-day":
-            last_end = e["end"]
-            break
-
-    first = events[0]
-    first_label = first["summary"]
-    if first["start"] != "all-day":
-        first_label += f" at {first['start']}"
-
-    parts = []
-
-    if n == 1:
-        parts.append(f"Just one thing on the calendar today — {first_label}.")
-    elif back_to_back >= 2:
-        parts.append(f"Back-to-back morning with {n} meetings, starting with {first_label}.")
-    elif n <= 3:
-        parts.append(f"You've got {first_label} and {n - 1} more on the schedule today.")
-    else:
-        parts.append(f"Busy day ahead — {n} events starting with {first_label}.")
-
-    if video_count >= 3:
-        parts.append(f"{video_count} of those are video calls.")
-    elif video_count == 1:
-        parts.append("One video call in the mix.")
-
-    if last_end and n >= 3:
-        parts.append(f"You're free after {last_end}.")
-
-    return " ".join(parts)
