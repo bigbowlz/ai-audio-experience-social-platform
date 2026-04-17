@@ -12,9 +12,13 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 import anthropic
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parents[2] / ".env")
 
 from agents.protocol import Brief, Pitch
 from agents.youtube.extractor import Contributor
@@ -128,6 +132,7 @@ def _format_bundle(
 def generate_pitches(
     bundle: list[dict[str, Any]],
     brief: Brief,
+    agent_name: str = "youtube",
 ) -> list[Pitch]:
     """Call Claude to select 3–5 candidates and write constrained hooks.
 
@@ -182,7 +187,7 @@ def generate_pitches(
                 source_refs.append(c["video_id"])
 
         pitches.append(Pitch(
-            agent="youtube",
+            agent=agent_name,
             title=sel.get("title", topic.replace("-", " ").title()),
             hook=sel["hook"],
             rationale=(

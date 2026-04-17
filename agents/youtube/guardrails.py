@@ -62,4 +62,6 @@ def compute_provenance_shape(provenance: list[Contributor]) -> ProvenanceShape:
         return ProvenanceShape.BALANCED
     if has_sub:
         return ProvenanceShape.SUB_ONLY
-    return ProvenanceShape.LIKE_ONLY
+    if has_like:
+        return ProvenanceShape.LIKE_ONLY
+    return ProvenanceShape.BALANCED
