@@ -175,5 +175,5 @@ class TestComputeProvenanceShape:
         assert compute_provenance_shape(prov) == ProvenanceShape.LIKE_ONLY
 
     def test_empty_provenance(self):
-        """Edge case: empty provenance → LIKE_ONLY (no subs, no likes both false → else branch)."""
-        assert compute_provenance_shape([]) == ProvenanceShape.LIKE_ONLY
+        """Edge case: empty provenance → BALANCED (no evidence = no skew)."""
+        assert compute_provenance_shape([]) == ProvenanceShape.BALANCED
