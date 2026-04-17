@@ -9,4 +9,6 @@ data/
 exports/
 **/.env
 # Google Calendar OAuth token (contains secrets)
-calendar_token.json
+**/calendar_token.json
+**/superpowers/*
+**/credentials.json
