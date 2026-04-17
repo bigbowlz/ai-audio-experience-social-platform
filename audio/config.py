@@ -31,3 +31,13 @@ REQUEST_TIMEOUT_SEC = 60
 # Retry config for transient errors (429, 5xx).
 MAX_RETRIES = 3
 RETRY_BACKOFF_BASE_SEC = 1.0  # exponential: 1s, 2s, 4s
+
+# Total pipeline timeout (seconds). If zero segments succeed within this
+# window, emit episode.failed.
+PIPELINE_TIMEOUT_SEC = 120
+
+# Budget tracking. ElevenLabs Turbo v2.5 pay-as-you-go: ~$0.30/1K chars.
+# $20 budget ≈ 66,667 chars. Warn at 80%.
+BUDGET_CHAR_LIMIT = 66_667
+BUDGET_WARN_THRESHOLD = 0.80  # warn when cumulative chars reach 80% of limit
+BUDGET_FILE = "./data/budget.json"

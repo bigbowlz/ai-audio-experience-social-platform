@@ -115,13 +115,13 @@ class TestTTSClientSynthesize:
         mock_elevenlabs.text_to_speech.convert.return_value = iter([b"\x00" * 100])
         client = TTSClient(api_key="sk_test", output_dir=tmp_output_dir)
         result = await client.synthesize(
-            text="A" * 150,  # 150 chars → ~1 sec at 150 chars/sec → 1000ms
+            text="A" * 150,  # 150 chars → ~11.5 sec at 13 chars/sec → 11538ms
             voice_id="voice123",
             episode_id="ep1",
             segment_index=0,
         )
         assert result["duration_estimated"] is True
-        assert result["duration_ms"] == 1000  # 150 chars / 150 chars_per_sec * 1000
+        assert result["duration_ms"] == 11538  # 150 chars / 13 chars_per_sec * 1000
 
     @pytest.mark.asyncio
     async def test_concurrent_semaphore_respected(self, tmp_output_dir, mock_elevenlabs):
@@ -214,6 +214,37 @@ class TestTTSRetryLogic:
         assert mock_elevenlabs.text_to_speech.convert.call_count == 1
 
     @pytest.mark.asyncio
+    async def test_exhausted_retries_raises(self, tmp_output_dir, mock_elevenlabs):
+        """When all MAX_RETRIES attempts fail, the final error propagates."""
+        api_error = Exception("server error")
+        api_error.status_code = 500  # type: ignore[attr-defined]
+        mock_elevenlabs.text_to_speech.convert.side_effect = api_error
+
+        from audio.config import MAX_RETRIES
+
+        with patch("audio.tts.asyncio.sleep"):
+            client = TTSClient(api_key="sk_test", output_dir=tmp_output_dir)
+            with pytest.raises(Exception, match="server error"):
+                await client.synthesize(
+                    text="Fail forever", voice_id="v1",
+                    episode_id="ep1", segment_index=0,
+                )
+        assert mock_elevenlabs.text_to_speech.convert.call_count == 1 + MAX_RETRIES
+
+    @pytest.mark.asyncio
+    async def test_timeout_retries_once_then_raises(
+        self, tmp_output_dir, mock_elevenlabs
+    ):
+        """Timeout retries once (attempt 0), then raises on attempt 1."""
+        with patch("audio.tts.asyncio.wait_for", side_effect=TimeoutError("timeout")):
+            client = TTSClient(api_key="sk_test", output_dir=tmp_output_dir)
+            with pytest.raises(TimeoutError):
+                await client.synthesize(
+                    text="Slow", voice_id="v1",
+                    episode_id="ep1", segment_index=0,
+                )
+
+    @pytest.mark.asyncio
     async def test_is_retryable_checks_status_codes(self, tmp_output_dir):
         client = TTSClient(api_key="sk_test", output_dir=tmp_output_dir)
         for code in [429, 500, 502, 503]:
@@ -225,3 +256,11 @@ class TestTTSRetryLogic:
             exc = Exception()
             exc.status_code = code  # type: ignore[attr-defined]
             assert client._is_retryable(exc) is False
+
+    @pytest.mark.asyncio
+    async def test_is_retryable_connection_errors(self, tmp_output_dir):
+        """ConnectionError and OSError are retryable; ValueError is not."""
+        client = TTSClient(api_key="sk_test", output_dir=tmp_output_dir)
+        assert client._is_retryable(ConnectionError("reset")) is True
+        assert client._is_retryable(OSError("network unreachable")) is True
+        assert client._is_retryable(ValueError("bad input")) is False

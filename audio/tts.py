@@ -29,8 +29,9 @@ from audio.pronunciation import apply_pronunciation
 
 logger = logging.getLogger(__name__)
 
-# Duration estimation fallback: ~150 chars per second of speech
-_CHARS_PER_SEC = 150
+# Duration estimation fallback: ~13 chars per second of speech
+# (~150 wpm * ~5 chars/word / 60 sec)
+_CHARS_PER_SEC = 13
 
 # HTTP status codes that warrant retry with exponential backoff
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
@@ -152,10 +153,14 @@ class TTSClient:
         gen_time_ms = int((time.monotonic() - start) * 1000)
 
         # Write to disk atomically (tmp → rename)
-        with open(tmp_path, "wb") as f:
-            for chunk in audio_chunks:
-                f.write(chunk)
-        tmp_path.rename(output_path)
+        try:
+            with open(tmp_path, "wb") as f:
+                for chunk in audio_chunks:
+                    f.write(chunk)
+            tmp_path.rename(output_path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
         # Parse duration via mutagen, fallback to char-count estimate
         duration_ms, estimated = self._parse_duration(output_path, char_count)
@@ -189,7 +194,7 @@ class TTSClient:
             audio = MP3(str(path))
             if audio.info and audio.info.length > 0:
                 return int(audio.info.length * 1000), False
-        except (HeaderNotFoundError, Exception):
+        except Exception:
             pass
         # Fallback: ~150 chars/sec spoken
         estimated_ms = int(char_count / _CHARS_PER_SEC * 1000)
