@@ -196,19 +196,21 @@ class TestPitch:
         assert len(pitches) == 1
         p = pitches[0]
         assert p["priority"] == 0.5
-        assert "Couldn't reach" in p["hook"]
         assert p["claim_kind"] == "neutral"
         assert p["thin_signal"] is False
+        assert p["data"]["api_reachable"] is False
+        assert p["data"]["events"] == []
 
     def test_no_events_pitch(self, agent: CalendarAgent, brief: Brief):
-        """Empty calendar produces 'clear today' pitch at priority 0.5."""
+        """Empty calendar produces pitch at priority 0.5 with empty events list."""
         ctx = {"api_reachable": True, "calendar_events": [], "calendar_events_rich": []}
         pitches = agent.pitch(brief, bootstrap_memory(), ctx, "dev")
 
         assert len(pitches) == 1
         p = pitches[0]
         assert p["priority"] == 0.5
-        assert "clear today" in p["hook"]
+        assert p["data"]["api_reachable"] is True
+        assert p["data"]["events"] == []
 
     @pytest.mark.parametrize(
         "event_count,expected_priority",
@@ -256,13 +258,14 @@ class TestPitch:
         assert pitches[0]["provenance_shape"] == "balanced"
         assert pitches[0]["thin_signal"] is False
 
-    def test_single_event_hook(self, agent: CalendarAgent, brief: Brief):
-        """Single event produces 'Just one thing' hook."""
+    def test_pitch_data_contains_rich_events(self, agent: CalendarAgent, brief: Brief):
+        """Pitch data carries the full rich events list for the Producer LLM."""
         rich = [{"summary": "1:1 with manager", "start": "14:00", "end": "14:30",
                  "duration_min": 30, "attendee_count": 1, "is_recurring": True,
                  "has_video_call": False, "organizer": ""}]
         ctx = {"api_reachable": True, "calendar_events": [], "calendar_events_rich": rich}
         pitches = agent.pitch(brief, bootstrap_memory(), ctx, "dev")
 
-        assert "Just one thing" in pitches[0]["hook"]
-        assert "1:1 with manager" in pitches[0]["hook"]
+        data = pitches[0]["data"]
+        assert data["api_reachable"] is True
+        assert data["events"] == rich
