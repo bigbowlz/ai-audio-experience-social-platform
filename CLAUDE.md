@@ -63,6 +63,10 @@ Specific conflict resolutions:
 - Save progress, checkpoint, resume → invoke checkpoint
 - Code quality, health check → invoke health
 
+## Coding conventions
+
+- **Time format:** All deterministic time output (narrative strings, fact summaries, log messages, timestamps) must use 24-hour format (e.g. `13:00`, not `1pm`).
+
 ## Note
 
 This file intentionally stays short to avoid drift.

@@ -30,3 +30,15 @@ Deferred work tracked from design reviews. Each item includes context so someone
 **Cons:** None. One paragraph.
 **Depends on:** api-storage component design session.
 **Context:** Outside voice finding. The design mentions the route in the dependencies table but doesn't specify the disk-to-URL mapping rule.
+
+
+## Calendar agent (from /plan-eng-review 2026-04-16)
+
+### Calendar as tempo signal ("invisible director")
+**Priority:** Medium (v1)
+**What:** Calendar agent emits a pacing profile alongside its pitches: `{pace: "compressed"|"relaxed"|"mixed", max_segment_sec: int}`. Producer's `select_segments()` consumes this signal to adjust segment lengths and episode pacing dynamically.
+**Why:** Right now, calendar pitches a segment about your day. With a tempo signal, calendar shapes the *feel* of the entire episode. Busy day with 7 meetings → shorter, punchier segments across all agents. Light day → longer deep-dives, room to breathe. The listener doesn't hear "your day is busy" as a segment, they feel it in the pacing of everything else.
+**Pros:** Calendar becomes the "invisible director" of the show. Most differentiated demo moment — no other podcast app does tempo-aware pacing. Outside voice from design review called this "the coolest version not considered."
+**Cons:** ~20 lines in `select_segments()` to consume the signal, plus calendar emitting it. Requires a design decision about how much control calendar should have over other agents' segment lengths.
+**Depends on:** Calendar agent v0 (live API + LLM pitch) shipping first.
+**Context:** Design doc Approach C. The signal shape would be a new field in ScopeContext or a separate return value from pitch(). `select_segments()` currently has hardcoded `DEFAULT_SEGMENT_SEC` per agent — the tempo signal would dynamically adjust these based on calendar density.

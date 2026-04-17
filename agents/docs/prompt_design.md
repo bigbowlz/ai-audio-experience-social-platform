@@ -14,12 +14,15 @@
   ┌─────────────────────────────────┐             ┌─────────────────────────────────────┐
   │ 1. fetch_context() → data       │             │ 1. Deterministic prelude            │
   │ 2. Algo: score, rank, top-8,    │             │    - 1 slot per agent (guaranteed)  │
-  │    compute claim_kind per topic │             │    - bonus slots by priority        │
-  │ 3. LLM: write hooks constrained │  pitches    │    - time-budget gate               │
-  │    by claim_kind + provenance   │ ──────────► │ 2. LLM: write full episode script   │
-  │ 4. Emit 3–5 Pitch objects       │             │    - cold open, segments, segue,    │
-  │    (or 1 thin-signal Pitch)     │             │      sign-off                       │
-  └─────────────────────────────────┘             │    - today's context woven in       │
+  │    compute claim_kind per topic │             │    - time-budget gate               │
+  │ 3. LLM: write hooks constrained │  pitches    │ 1.5 LLM: bonus selection + reasons  │
+  │    by claim_kind + provenance   │ ──────────► │    - picks bonus slots (taste+ctx)  │
+  │ 4. Emit 3–5 Pitch objects       │             │    - reasoning_summary per pick     │
+  │    (or 1 thin-signal Pitch)     │             │    - fallback: priority-sort        │
+  └─────────────────────────────────┘             │ 2. LLM: write full episode script   │
+                                                  │    - cold open, segments, segues,   │
+                                                  │      sign-off                       │
+                                                  │    - today's context woven in       │
                                                   └─────────────────────────────────────┘
 ```
 
@@ -31,7 +34,7 @@
 
 ### Failure mode
 
-The youtube_agent's `pitch()` LLM receives a topic + scores + K=5 provenance and writes a hook like "you've been deep into jazz lately." With thin provenance (e.g., 1 like from 6 months ago on a rock channel that happened to be tagged `jazz`) the LLM can write confident wrong claims. One bad sentence breaks user trust. The failure is not model quality — it's that the LLM is asked to both _classify the evidence shape_ and _write the hook_, and gets the classification wrong silently.
+The youtube*agent's `pitch()` LLM receives a topic + scores + K=5 provenance and writes a hook like "you've been deep into jazz lately." With thin provenance (e.g., 1 like from 6 months ago on a rock channel that happened to be tagged `jazz`) the LLM can write confident wrong claims. One bad sentence breaks user trust. The failure is not model quality — it's that the LLM is asked to both \_classify the evidence shape* and _write the hook_, and gets the classification wrong silently.
 
 ### Solution: deterministic `claim_kind` (decided 2026-04-15)
 
@@ -47,12 +50,12 @@ class ClaimKind(str, Enum):
 
 ### Preconditions (deterministic, computed per candidate topic T)
 
-| `claim_kind` | Precondition                                                                          | Rationale                                                                                                                                                                                                                                                                                                                  |
-| ------------ | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claim_kind` | Precondition                                                                                                                | Rationale                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `rising`     | `long_term[T] > 0` AND `recent[T] > long_term[T]` AND `like_count(provenance[T]) ≥ 3` AND `stats.total_recent_weight ≥ 2.0` | Topic has an established base (`long_term > 0`) but recent attention is outpacing it, with ≥3 likes as evidence floor and sufficient recent-window confidence (`total_recent_weight ≥ 2.0` prevents "rising" claims from sparse recent windows where L1-normalized shares are artificially inflated). `long_term > 0` prevents like-only topics from matching — those are `discovery`, not `rising`. Both scores are L1-normalized, so the comparison is unit-consistent (see youtube spec §Aggregation). |
-| `discovery`  | `long_term[T] == 0` AND `like_count(provenance[T]) ≥ 2`                               | Topic appears only in likes, no subscriptions. ≥2 likes avoids "discovery" claims from a single drive-by like.                                                                                                                                                                                                             |
-| `durable`    | `long_term[T] > 0` AND `sub_count(provenance[T]) ≥ 2`                                 | ≥2 subscriptions is the floor for "you've been into X." One sub is anecdotal.                                                                                                                                                                                                                                              |
-| `neutral`    | default — none of the above hold                                                      | Safe fallback. Hook states topic + provenance facts without temporal framing.                                                                                                                                                                                                                                              |
+| `discovery`  | `long_term[T] == 0` AND `like_count(provenance[T]) ≥ 2`                                                                     | Topic appears only in likes, no subscriptions. ≥2 likes avoids "discovery" claims from a single drive-by like.                                                                                                                                                                                                                                                                                                                                                                                            |
+| `durable`    | `long_term[T] > 0` AND `sub_count(provenance[T]) ≥ 2`                                                                       | ≥2 subscriptions is the floor for "you've been into X." One sub is anecdotal.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `neutral`    | default — none of the above hold                                                                                            | Safe fallback. Hook states topic + provenance facts without temporal framing.                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 **Evaluation order:** `rising` → `discovery` → `durable` → `neutral`. First match wins. `rising` is checked first because it's the most specific claim and has the strictest preconditions (requires both windows + count floor).
 
@@ -182,7 +185,7 @@ youtube_agent has "no external search in `pitch()`" — content discovery is Pro
 **Flow:**
 
 1. **Brief assembly** (pre-pitch). System assembles `Brief` with `today_context` from weather API + calendar API. This happens once per episode, before any agent pitches.
-2. **Agent `pitch()`**. Each agent receives `Brief` including `today_context`. Agents _may_ read it for context-aware pitching (e.g., calendar_agent adjusts pitch salience based on how many events today; weather_agent's pitch is inherently today-indexed). youtube_agent's hooks do _not_ reference today's context — youtube knows taste, not the world.
+2. **Agent `pitch()`**. Each agent receives `Brief` including `today_context`. Agents _may_ read it for context-aware pitching (e.g., calendar*agent adjusts pitch salience based on how many events today; weather_agent's pitch is inherently today-indexed). youtube_agent's hooks do \_not* reference today's context — youtube knows taste, not the world.
 3. **Producer scripting**. Producer's LLM receives all selected pitches + `Brief.today_context`. Producer writes the full episode script — cold open, per-segment scripts, segues, sign-off — weaving today's context into its own voice. "It's a rainy Tuesday, and your jazz channels have been busy" is Producer narration, not an agent claim.
 
 **Content discovery (new albums, trending videos, world news) is Producer's responsibility.** If Producer has access to a "what's new" feed (v1+), it injects this into its script around relevant agent segments. This never flows backward into agent pitches — agents own taste signal, Producer owns world signal. v0 does not build a "what's new" feed; Producer scripts from `today_context` + pitch content only.
@@ -350,6 +353,190 @@ def select_segments(
 
 Producer scripts this segment using its own judgment for the agent's domain. The low priority means thin-signal segments will not win bonus slots, only their guaranteed slot.
 
+### Step 1.5: LLM bonus selection pass (decided 2026-04-17)
+
+Runs after Phase 1 (guaranteed slots are fixed) and before budget-gated bonus inclusion.
+A single LLM call picks bonus slots using Producer taste — `today_context`,
+`producer_memory`, and `claim_kind` diversity — rather than raw priority alone.
+It also generates `reasoning_summary` for every pick (guaranteed + bonus), making
+the `producer.pick` SSE trace real reasoning, not post-hoc narration.
+
+**Primary path / fallback.** The deterministic priority-sort in Step 1's Phase 2 loop
+becomes the fallback. LLM call uses a 5-second timeout with one automatic retry;
+if both attempts fail, the fallback fires with no impact on guaranteed slots.
+
+**Memory-isolation invariant holds.** The Step 1.5 LLM sees only `priority` scalars
+and `claim_kind` on each Pitch — never raw `profile_state` or `topic_multiplier`.
+
+**Segue overhead applies only to bonus slots.** Guaranteed slots' segues are
+already deducted in Phase 1 budget arithmetic (`len(selected) - 1` segues).
+
+#### Input schema
+
+```python
+{
+    "guaranteed_slots": [        # from Phase 1 — fixed; LLM cannot remove these
+        {
+            "agent": "youtube",
+            "title": "Jazz exploration",
+            "priority": 0.91,
+            "claim_kind": "rising",
+            "suggested_length_sec": 90,
+        },
+        # ... one per active agent
+    ],
+    "remaining_pitches": [       # candidates for bonus slots; LLM may select 0 or more
+        {
+            "agent": "youtube",
+            "title": "Web3 skepticism",
+            "priority": 0.72,
+            "claim_kind": "durable",
+            "suggested_length_sec": 90,  # Producer-assigned; used for budget math
+        },
+        # ...
+    ],
+    "budget_remaining_sec": 50,  # after guaranteed slots + Phase 1 segues; hard cap
+    "today_context": {           # from Brief
+        "date": "2026-04-17",
+        "day_of_week": "Thursday",
+        "time_of_day": "morning",
+        "weather_summary": "rainy, 12°C",
+        "calendar_events": ["Team standup 10am"],
+    },
+    "producer_memory": {         # v0: empty dict {}; v1+: learned priors
+        "segment_count_preference": 5,
+        "opener_agent_preference": "calendar",
+        "fatigue_point_sec": 900,
+    },
+    "segue_overhead_sec": 10,    # cost per bonus segment
+}
+```
+
+#### Output schema
+
+```python
+class BonusSelectionResult(TypedDict):
+    overall_reasoning: str                        # ≤80 chars; for producer.selecting.started
+    guaranteed_pick_reasons: list[PickReason]     # one per guaranteed slot
+    bonus_picks: list[BonusPick]                  # bonus pitches selected, in preferred order
+
+class PickReason(TypedDict):
+    pitch_title: str       # must match a title in guaranteed_slots
+    agent: str
+    reasoning_summary: str   # ≤80 chars; for producer.pick SSE event
+
+class BonusPick(TypedDict):
+    pitch_title: str       # must match a title in remaining_pitches exactly
+    agent: str
+    reasoning_summary: str   # ≤80 chars; for producer.pick SSE event
+```
+
+#### System prompt constraints
+
+1. **Cannot touch guaranteed slots.** Every agent in `guaranteed_slots` already has
+   one segment. Do not add, remove, or modify them. Write a `reasoning_summary`
+   per guaranteed slot explaining why it's compelling given today's context.
+
+2. **Bonus selection is optional.** You may select 0 or more bonus pitches from
+   `remaining_pitches`. Only select pitches from that list — do not invent pitches.
+
+3. **Budget awareness.** Each bonus pitch costs `suggested_length_sec +
+segue_overhead_sec`. Respect `budget_remaining_sec`. If no pitch fits, output
+   an empty `bonus_picks` list.
+
+4. **Diversity is the primary selection signal.** Prefer bonus pitches that:
+   - Add a different `claim_kind` than the guaranteed slots (e.g., a `discovery`
+     pitch to a pool dominated by `durable` and `neutral`)
+   - Resonate with `today_context` (rainy morning → introspective or cozy topics;
+     calendar event → preparation or focus topics)
+   - Do not duplicate an agent already well-represented in guaranteed slots
+
+5. **Producer memory informs but does not mandate.** If `segment_count_preference`
+   is 5 and 4 guaranteed slots exist, lean toward adding one bonus segment. If
+   `producer_memory` is empty `{}`, operate from `today_context` and diversity
+   signals only — do not reference absent fields.
+
+6. **reasoning_summary format.** ≤80 chars. Name the topic and the reason.
+   Good: `"@pg essay → 5 min (recent like spike, adds discovery energy)"`.
+   Bad: `"selected for variety"`.
+
+#### Code-side budget enforcement (after LLM output)
+
+Even when the LLM path succeeds, the caller enforces budget and validates titles:
+
+```python
+for pick in llm_result.bonus_picks:
+    pitch = _find_in_remaining(pick.pitch_title, remaining)
+    if pitch is None:
+        # LLM returned unknown title — log and skip; budget untouched, next pick evaluated
+        log.warning("select_bonus_llm: unknown title %r — skipping", pick.pitch_title)
+        continue
+    seg_len = _segment_length(pitch, length_overrides)
+    # _segment_length() falls back to pitch["suggested_length_sec"] when no override
+    cost = seg_len + SEGUE_OVERHEAD_SECS
+    if budget >= cost:
+        selected.append({**pitch, "suggested_length_sec": seg_len,
+                         "reasoning_summary": pick.reasoning_summary})
+        budget -= cost
+    # cost > budget: skip this pick, continue — a cheaper pitch may follow
+```
+
+#### Fallback (LLM unavailable or timed out)
+
+```python
+def _fallback_bonus_selection(remaining, budget, length_overrides):
+    """Deterministic priority-sort — same as Step 1 Phase 2 loop."""
+    for pitch in sorted(remaining, key=lambda p: p["priority"], reverse=True):
+        seg_len = _segment_length(pitch, length_overrides)
+        cost = seg_len + SEGUE_OVERHEAD_SECS
+        if budget >= cost:
+            selected.append({**pitch, "suggested_length_sec": seg_len,
+                             "reasoning_summary": f"{pitch['agent']}: {pitch['title']}"})
+            budget -= cost
+
+def _fallback_guaranteed_reasons(guaranteed_slots):
+    return [{"pitch_title": s["title"], "agent": s["agent"],
+             "reasoning_summary": f"{s['agent']}: guaranteed slot"}
+            for s in guaranteed_slots]
+```
+
+Fallback `reasoning_summary` strings (`"{agent}: {title}"`, `"{agent}: guaranteed slot"`)
+are visually distinguishable from real LLM output in dev/test logs.
+
+#### SSE integration
+
+```python
+# producer.selecting.started
+emit("producer.selecting.started", {
+    "reasoning_summary": llm_result.overall_reasoning
+    # fallback: "selecting segments by priority within time budget"
+})
+
+# producer.pick — guaranteed slots first (Phase 1 order)
+for slot, reason in zip(guaranteed_slots, llm_result.guaranteed_pick_reasons):
+    emit("producer.pick", {
+        "agent": slot["agent"],
+        "pitch_title": slot["title"],
+        "allocated_sec": slot["suggested_length_sec"],
+        "reasoning_summary": reason["reasoning_summary"],
+    })
+
+# producer.pick — accepted bonus slots
+for bonus in accepted_bonus:
+    emit("producer.pick", {
+        "agent": bonus["agent"],
+        "pitch_title": bonus["title"],
+        "allocated_sec": bonus["suggested_length_sec"],
+        "reasoning_summary": bonus["reasoning_summary"],
+    })
+
+# producer.selecting.done
+emit("producer.selecting.done", {
+    "running_order": running_order,
+    "reasoning_summary": f"{len(selected)} segments, {total_sec}s allocated",
+})
+```
+
 ### Step 2: LLM pass — episode script generation
 
 Producer's LLM receives:
@@ -420,46 +607,49 @@ Producer reads `producer_memory` at script-time. This memory tracks cross-episod
 
 ### Rejected alternatives
 
-| Alternative                                                                | Why rejected                                                                                                                                                                                                                      |
-| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Fully LLM-driven segment selection (no deterministic prelude)              | Can't guarantee per-agent representation. The LLM might drop a low-priority agent entirely, contradicting the user's selection. The per-agent guarantee is a hard constraint, not a preference.                                   |
-| Fully deterministic running-order (no LLM pass)                            | No segues, no today-threading, no narrative flow. Deterministic ordering produces a flat sequence with no connective tissue. The LLM's job is narration, not selection — selection is deterministic.                              |
-| Producer rewrites agent hooks                                              | Covered in §3. Agent hooks are creative briefs, not scripts. Producer writes its own scripts _informed by_ hooks. Rewriting hooks blurs ownership and re-opens hallucination risk.                                                |
-| Round-robin bonus slots (each agent gets a second before any gets a third) | Over-constrains selection. A user with rich youtube signal and thin weather signal should get more youtube content, not an artificial second weather pitch. Highest-remaining-priority across all agents is the right tiebreaker. |
-| Agent hooks spoken verbatim in episode                                     | Agents don't know the show's voice, pacing, or today's context. Agent hooks are written for a different consumer (Producer) than the final listener. Producer translates taste-signal into radio.                                 |
+| Alternative                                                                | Why rejected                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fully LLM-driven segment selection (no deterministic prelude)              | Can't guarantee per-agent representation. The LLM might drop a low-priority agent entirely, contradicting the user's selection. The per-agent guarantee is a hard constraint, not a preference.                                                           |
+| Bonus slots selected by priority only (no Step 1.5 LLM)                    | today_context and producer_memory never influence content selection. reasoning_summary on producer.pick SSE events becomes post-hoc narration over a deterministic sort — theater, not real reasoning. The visible reasoning trace IS the product thesis. |
+| LLM reasoning-summary only (selection stays deterministic)                 | Same problem as above. An LLM explaining picks it didn't make produces fake reasoning — "I chose this because..." when the LLM had no say. Contradicts master design intent (Phase 5 budgets 1 LLM call for select(), not write_script()).                |
+| Fully deterministic running-order (no LLM pass at all)                     | No segues, no today-threading, no narrative flow. Deterministic ordering produces a flat sequence with no connective tissue.                                                                                                                              |
+| Producer rewrites agent hooks                                              | Covered in §3. Agent hooks are creative briefs, not scripts. Producer writes its own scripts _informed by_ hooks. Rewriting hooks blurs ownership and re-opens hallucination risk.                                                                        |
+| Round-robin bonus slots (each agent gets a second before any gets a third) | Over-constrains selection. A user with rich youtube signal and thin weather signal should get more youtube content, not an artificial second weather pitch. Highest-remaining-priority across all agents is the right tiebreaker.                         |
+| Agent hooks spoken verbatim in episode                                     | Agents don't know the show's voice, pacing, or today's context. Agent hooks are written for a different consumer (Producer) than the final listener. Producer translates taste-signal into radio.                                                         |
 
 ---
 
 ## §5 Key decisions summary
 
-| #   | Decision                     | Chosen                                                                                                                                                                                                                                                                                               | Rejected                                                                                            |
-| --- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| 1   | Hook hallucination guardrail | Deterministic `claim_kind` computed pre-LLM, passed as constraint. 4 kinds: `durable`, `rising`, `discovery`, `neutral` with precondition floors on provenance counts.                                                                                                                               | Self-rubric LLM pass; pure prompt rules; post-hoc validator                                         |
-| 2   | Asymmetric provenance shape  | `provenance_shape ∈ {balanced, sub_only, like_only}` computed at profile-build time. Single unified prompt template with per-shape directive block. Hook-fidelity rubric (5 axes × 0–2, ≥7/10 pass).                                                                                                 | Three branched templates; LLM-inferred shape; drop shape field                                      |
-| 3   | Today's-radio currency       | `Brief.today_context` populated by weather + calendar agents in `fetch_context()`. Agents read it; Producer scripts with it. Agent hooks stay taste-only. Content discovery is Producer's job, scripted in segues/open/close. Two-phase fetch (weather+calendar first → Brief complete → all pitch). | Producer hook rewrite; `fresh_evidence` injection; agent-side search; Producer-side duplicate fetch |
-| 4   | Producer running-order       | Two-step: deterministic prelude (1 guaranteed per agent + bonus by priority under time budget) → LLM writes full episode script (cold open, segments, segues, sign-off). Per-agent guarantee is hard. Producer memory is a read-only stub pending learning-loop session.                             | Fully LLM selection; fully deterministic order; round-robin bonus; verbatim agent hooks             |
+| #   | Decision                     | Chosen                                                                                                                                                                                                                                                                                                                                                                                                    | Rejected                                                                                              |
+| --- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 1   | Hook hallucination guardrail | Deterministic `claim_kind` computed pre-LLM, passed as constraint. 4 kinds: `durable`, `rising`, `discovery`, `neutral` with precondition floors on provenance counts.                                                                                                                                                                                                                                    | Self-rubric LLM pass; pure prompt rules; post-hoc validator                                           |
+| 2   | Asymmetric provenance shape  | `provenance_shape ∈ {balanced, sub_only, like_only}` computed at profile-build time. Single unified prompt template with per-shape directive block. Hook-fidelity rubric (5 axes × 0–2, ≥7/10 pass).                                                                                                                                                                                                      | Three branched templates; LLM-inferred shape; drop shape field                                        |
+| 3   | Today's-radio currency       | `Brief.today_context` populated by weather + calendar agents in `fetch_context()`. Agents read it; Producer scripts with it. Agent hooks stay taste-only. Content discovery is Producer's job, scripted in segues/open/close. Two-phase fetch (weather+calendar first → Brief complete → all pitch).                                                                                                      | Producer hook rewrite; `fresh_evidence` injection; agent-side search; Producer-side duplicate fetch   |
+| 4   | Producer running-order       | Three-step: (1) deterministic prelude — 1 guaranteed slot per agent; (1.5) LLM bonus selection — picks bonus slots using today_context + producer_memory + claim_kind diversity, generates reasoning_summary per pick, deterministic priority-sort as fallback; (2) LLM script pass — cold open, segments, segues, sign-off. Per-agent guarantee is hard code. Producer memory is a read-only stub at v0. | Fully LLM selection; fully deterministic order; reasoning-only LLM; round-robin bonus; verbatim hooks |
 
 ## Dependencies on other components
 
-| Component         | Contract from this doc                                                                                                            | Direction                                       |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `agents/youtube`  | `claim_kind` + `provenance_shape` fields on `Pitch`; `compute_claim_kind()` + `compute_provenance_shape()` functions in algo step | extends youtube pitch()                         |
-| `agents` (parent) | `Pitch` shape extended with `thin_signal`, `claim_kind`, `provenance_shape`                                                       | extends protocol                                |
-| `Brief`           | `today_context: TodayContext` field added                                                                                         | extends Brief shape                             |
-| `producer`        | `select_segments()` prelude + LLM script pass; `EpisodeScript` output schema; cannot drop/invent segments                         | new — this doc specs producer's prompting layer |
-| `learning-loop`   | Producer memory shape — stub here, designed in learning-loop session                                                              | forward reference                               |
-| `weather_agent`   | Returns `weather_summary` in `ScopeContext` from `fetch_context()`; orchestrator assembles into `Brief.today_context`             | new contract                                    |
-| `calendar_agent`  | Returns `calendar_events` in `ScopeContext` from `fetch_context()`; orchestrator assembles into `Brief.today_context`             | new contract                                    |
+| Component         | Contract from this doc                                                                                                                                                                                                 | Direction                                       |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `agents/youtube`  | `claim_kind` + `provenance_shape` fields on `Pitch`; `compute_claim_kind()` + `compute_provenance_shape()` functions in algo step                                                                                      | extends youtube pitch()                         |
+| `agents` (parent) | `Pitch` shape extended with `thin_signal`, `claim_kind`, `provenance_shape`                                                                                                                                            | extends protocol                                |
+| `Brief`           | `today_context: TodayContext` field added                                                                                                                                                                              | extends Brief shape                             |
+| `producer`        | `select_segments()` deterministic prelude + `select_bonus_segments_llm()` LLM bonus selection + `write_script()` LLM script pass; `BonusSelectionResult` + `EpisodeScript` output schemas; cannot drop/invent segments | new — this doc specs producer's prompting layer |
+| `learning-loop`   | Producer memory shape — stub here, designed in learning-loop session                                                                                                                                                   | forward reference                               |
+| `weather_agent`   | Returns `weather_summary` in `ScopeContext` from `fetch_context()`; orchestrator assembles into `Brief.today_context`                                                                                                  | new contract                                    |
+| `calendar_agent`  | Returns `calendar_events` in `ScopeContext` from `fetch_context()`; orchestrator assembles into `Brief.today_context`                                                                                                  | new contract                                    |
 
-## Test mandate (added 2026-04-16, eng review)
+## Test mandate (added 2026-04-16, eng review; updated 2026-04-17)
 
 The deterministic functions in this doc are the guardrails that prevent hook hallucination. They must have unit tests before the LLM prompt step is built. Fixtures drawn from committed probe JSON at `tmp/ydata/probe_1776208130/`.
 
-| Function | Test coverage required |
-| --- | --- |
-| `compute_claim_kind()` | All 4 claim kinds + evaluation order (first match wins) + the jazz-from-one-old-like scenario + `total_recent_weight` floor on `rising` |
-| `compute_provenance_shape()` | All 3 shapes (balanced, sub_only, like_only) |
-| `select_segments()` | Phase 1 guaranteed slots + Phase 2 bonus by priority + budget exhaustion + thin-signal pitch handling + `MAX_SEGMENT_SEC` clamping + cold-open-has-no-segue arithmetic + `DEFAULT_SEGMENT_SEC` applied when no overrides + `length_overrides` respected when provided |
+| Function                                 | Test coverage required                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `compute_claim_kind()`                   | All 4 claim kinds + evaluation order (first match wins) + the jazz-from-one-old-like scenario + `total_recent_weight` floor on `rising`                                                                                                                                                                                                                                                                                                            |
+| `compute_provenance_shape()`             | All 3 shapes (balanced, sub_only, like_only)                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `select_segments()`                      | Phase 1 guaranteed slots + Phase 2 bonus by priority + budget exhaustion + thin-signal pitch handling + `MAX_SEGMENT_SEC` clamping + cold-open-has-no-segue arithmetic + `DEFAULT_SEGMENT_SEC` applied when no overrides + `length_overrides` respected when provided                                                                                                                                                                              |
+| `select_bonus_segments_llm()` (Step 1.5) | LLM success path: bonus picks accepted within budget + title-mismatch logged and skipped + cheap pitch after expensive miss still accepted; fallback path (LLM timeout): all guaranteed slots present + bonus filled by priority-sort + reasoning_summary is `"{agent}: {title}"`; empty `producer_memory` `{}`: output deterministic for same inputs; budget gate: LLM-nominated pitch that exceeds budget is rejected without blocking next pick |
 
 ## Open questions (parked)
 

@@ -148,7 +148,7 @@ Handle `@ofmiles` → `"ofmiles"`, `CPI` → `"C P I"` on first mention. Post-LL
 
 ```python
 PRONUNCIATION_RULES: list[tuple[str, str]] = [
-    (r"@(\w+)", r"\1"),                  # strip @ from handles
+    (r"(?<!\w)@(\w+)", r"\1"),            # strip @ from handles (not emails)
     (r"\bCPI\b", "C P I"),               # expand common acronyms
     (r"\bGDP\b", "G D P"),
     (r"\bAI\b", "A I"),
@@ -207,7 +207,7 @@ class SegmentResult(TypedDict):
     url: str                        # "/audio/{episode_id}/segment_{segment_index}.mp3"
     duration_ms: int                # audio duration, parsed from MP3 header via mutagen
     duration_estimated: bool        # True if mutagen failed and duration was estimated
-                                    #   from character count (~150 chars/sec spoken)
+                                    #   from character count (~13 chars/sec spoken)
     generation_time_ms: int         # wall-clock TTS generation time
     character_count: int            # chars in the successful request
     billed_character_count: int     # total chars billed including failed retries
@@ -218,7 +218,7 @@ class SegmentResult(TypedDict):
 
 ```python
 async def _synthesize_batch(self, text: str, voice_id: str,
-                             output_path: Path) -> SegmentResult:
+                             episode_id: str, segment_index: int) -> SegmentResult:
     """
     1. Call client.text_to_speech.convert() via SDK
     2. Await full response (complete MP3 bytes)
