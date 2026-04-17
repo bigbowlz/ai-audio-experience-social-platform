@@ -1,6 +1,6 @@
 """Tests for TTSClient batch TTS synthesis.
 
-Spec: audio/docs/DESIGN.md §Interface contract, §Batch path
+Spec: audio/docs/DESIGN.md §Interface contract, §Batch path, §Error Handling Matrix
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from audio.tts import TTSClient, SegmentResult
+from audio.tts import TTSClient, SegmentResult, _RETRYABLE_STATUS_CODES
 
 
 # Minimal valid MP3 frame (MPEG1 Layer3, 128kbps, 44100Hz, ~26ms)
@@ -128,3 +128,100 @@ class TestTTSClientSynthesize:
         """Verify max_concurrent limits parallel calls."""
         client = TTSClient(api_key="sk_test", output_dir=tmp_output_dir, max_concurrent=2)
         assert client._semaphore._value == 2
+
+    @pytest.mark.asyncio
+    async def test_uses_voice_settings_from_config(self, tmp_output_dir, mock_elevenlabs):
+        """Voice settings should come from config, not hardcoded."""
+        client = TTSClient(api_key="sk_test", output_dir=tmp_output_dir)
+        await client.synthesize(
+            text="Test", voice_id="v1", episode_id="ep1", segment_index=0,
+        )
+        call_kwargs = mock_elevenlabs.text_to_speech.convert.call_args
+        settings = call_kwargs.kwargs["voice_settings"]
+        assert settings["stability"] == 0.5
+        assert settings["use_speaker_boost"] is True
+
+
+class TestTTSRetryLogic:
+    """Spec: audio/docs/DESIGN.md §Error Handling Matrix"""
+
+    @pytest.mark.asyncio
+    async def test_retries_on_retryable_error(self, tmp_output_dir, mock_elevenlabs):
+        """429/5xx triggers exponential backoff retry up to MAX_RETRIES."""
+        api_error = Exception("rate limited")
+        api_error.status_code = 429  # type: ignore[attr-defined]
+
+        call_count = 0
+        def side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise api_error
+            return iter([FAKE_MP3_HEADER])
+
+        mock_elevenlabs.text_to_speech.convert.side_effect = side_effect
+
+        with patch("audio.tts.asyncio.sleep"):  # skip actual backoff delays
+            client = TTSClient(api_key="sk_test", output_dir=tmp_output_dir)
+            result = await client.synthesize(
+                text="Retry me", voice_id="v1", episode_id="ep1", segment_index=0,
+            )
+        assert result["segment_index"] == 0
+        assert call_count == 3  # 2 failures + 1 success
+
+    @pytest.mark.asyncio
+    async def test_billed_chars_accumulate_across_retries(
+        self, tmp_output_dir, mock_elevenlabs
+    ):
+        """ElevenLabs bills per-attempt, so billed_character_count must accumulate."""
+        api_error = Exception("server error")
+        api_error.status_code = 500  # type: ignore[attr-defined]
+
+        call_count = 0
+        def side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise api_error
+            return iter([FAKE_MP3_HEADER])
+
+        mock_elevenlabs.text_to_speech.convert.side_effect = side_effect
+
+        with patch("audio.tts.asyncio.sleep"):
+            client = TTSClient(api_key="sk_test", output_dir=tmp_output_dir)
+            result = await client.synthesize(
+                text="Bill me", voice_id="v1", episode_id="ep1", segment_index=0,
+            )
+        char_count = result["character_count"]
+        # 2 attempts (1 failed + 1 success) = 2x billed
+        assert result["billed_character_count"] == char_count * 2
+
+    @pytest.mark.asyncio
+    async def test_unrecoverable_error_raises_immediately(
+        self, tmp_output_dir, mock_elevenlabs
+    ):
+        """401/422 should NOT retry — raise immediately."""
+        api_error = Exception("unauthorized")
+        api_error.status_code = 401  # type: ignore[attr-defined]
+        mock_elevenlabs.text_to_speech.convert.side_effect = api_error
+
+        client = TTSClient(api_key="sk_test", output_dir=tmp_output_dir)
+        with pytest.raises(Exception, match="unauthorized"):
+            await client.synthesize(
+                text="Bad key", voice_id="v1", episode_id="ep1", segment_index=0,
+            )
+        # Should have been called exactly once (no retry)
+        assert mock_elevenlabs.text_to_speech.convert.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_is_retryable_checks_status_codes(self, tmp_output_dir):
+        client = TTSClient(api_key="sk_test", output_dir=tmp_output_dir)
+        for code in [429, 500, 502, 503]:
+            exc = Exception()
+            exc.status_code = code  # type: ignore[attr-defined]
+            assert client._is_retryable(exc) is True
+
+        for code in [401, 403, 422]:
+            exc = Exception()
+            exc.status_code = code  # type: ignore[attr-defined]
+            assert client._is_retryable(exc) is False

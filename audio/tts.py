@@ -3,12 +3,13 @@
 Synthesizes text to per-segment MP3 files on local disk.
 Uses ElevenLabs Python SDK. Batch-only (streaming dropped for v0).
 
-Spec: audio/docs/DESIGN.md §Interface contract, §Batch path
+Spec: audio/docs/DESIGN.md §Interface contract, §Batch path, §Error Handling Matrix
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from pathlib import Path
 from typing import TypedDict
@@ -16,11 +17,23 @@ from typing import TypedDict
 from elevenlabs.client import ElevenLabs
 from mutagen.mp3 import MP3, HeaderNotFoundError
 
-from audio.config import ELEVENLABS_MODEL, OUTPUT_FORMAT
+from audio.config import (
+    ELEVENLABS_MODEL,
+    MAX_RETRIES,
+    OUTPUT_FORMAT,
+    REQUEST_TIMEOUT_SEC,
+    RETRY_BACKOFF_BASE_SEC,
+    VOICE_SETTINGS,
+)
 from audio.pronunciation import apply_pronunciation
+
+logger = logging.getLogger(__name__)
 
 # Duration estimation fallback: ~150 chars per second of speech
 _CHARS_PER_SEC = 150
+
+# HTTP status codes that warrant retry with exponential backoff
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
 
 
 class SegmentResult(TypedDict):
@@ -64,6 +77,8 @@ class TTSClient:
 
         Writes to {output_dir}/{episode_id}/segment_{segment_index}.mp3.
         Applies pronunciation rules before sending to ElevenLabs.
+        Retries transient errors (429, 5xx) with exponential backoff.
+        Per-request timeout: REQUEST_TIMEOUT_SEC (60s).
 
         Returns SegmentResult with URL, timing, and billing metadata.
         """
@@ -81,6 +96,7 @@ class TTSClient:
     ) -> SegmentResult:
         processed_text = apply_pronunciation(text)
         char_count = len(processed_text)
+        billed_chars = 0
 
         # Prepare output path
         episode_dir = self._output_dir / episode_id
@@ -88,23 +104,51 @@ class TTSClient:
         output_path = episode_dir / f"segment_{segment_index}.mp3"
         tmp_path = output_path.with_suffix(".mp3.tmp")
 
-        # Call ElevenLabs batch API (sync SDK call run in executor)
+        # Retry loop with exponential backoff for transient errors
+        last_error: Exception | None = None
         start = time.monotonic()
-        audio_chunks = await asyncio.get_running_loop().run_in_executor(
-            None,
-            lambda: self._client.text_to_speech.convert(
-                voice_id=voice_id,
-                text=processed_text,
-                model_id=self._model_id,
-                voice_settings={
-                    "stability": 0.5,
-                    "similarity_boost": 0.75,
-                    "style": 0.0,
-                    "use_speaker_boost": True,
-                },
-                output_format=OUTPUT_FORMAT,
-            ),
-        )
+
+        for attempt in range(1 + MAX_RETRIES):
+            billed_chars += char_count  # ElevenLabs bills per-attempt
+            try:
+                audio_chunks = await asyncio.wait_for(
+                    asyncio.get_running_loop().run_in_executor(
+                        None,
+                        lambda: self._client.text_to_speech.convert(
+                            voice_id=voice_id,
+                            text=processed_text,
+                            model_id=self._model_id,
+                            voice_settings=VOICE_SETTINGS,
+                            output_format=OUTPUT_FORMAT,
+                        ),
+                    ),
+                    timeout=REQUEST_TIMEOUT_SEC,
+                )
+                break  # success
+            except TimeoutError:
+                last_error = TimeoutError(
+                    f"Request timeout ({REQUEST_TIMEOUT_SEC}s) on attempt {attempt + 1}"
+                )
+                if attempt == 0:
+                    # Network timeout: retry once per spec
+                    logger.warning("Segment %d: timeout, retrying once", segment_index)
+                    continue
+                raise last_error
+            except Exception as exc:
+                last_error = exc
+                if self._is_retryable(exc) and attempt < MAX_RETRIES:
+                    delay = RETRY_BACKOFF_BASE_SEC * (2 ** attempt)
+                    logger.warning(
+                        "Segment %d: retryable error (attempt %d/%d), "
+                        "backing off %.1fs: %s",
+                        segment_index, attempt + 1, 1 + MAX_RETRIES, delay, exc,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+        else:
+            raise last_error  # type: ignore[misc]
+
         gen_time_ms = int((time.monotonic() - start) * 1000)
 
         # Write to disk atomically (tmp → rename)
@@ -123,8 +167,20 @@ class TTSClient:
             duration_estimated=estimated,
             generation_time_ms=gen_time_ms,
             character_count=char_count,
-            billed_character_count=char_count,
+            billed_character_count=billed_chars,
         )
+
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        """Check if an exception from the ElevenLabs SDK is retryable."""
+        # The ElevenLabs SDK raises ApiError with a status_code attribute
+        status = getattr(exc, "status_code", None)
+        if status and status in _RETRYABLE_STATUS_CODES:
+            return True
+        # Also retry on connection-level errors
+        if isinstance(exc, (ConnectionError, OSError)):
+            return True
+        return False
 
     @staticmethod
     def _parse_duration(path: Path, char_count: int) -> tuple[int, bool]:
