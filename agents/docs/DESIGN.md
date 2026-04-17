@@ -11,10 +11,43 @@
 
 Four agents that produce ranked `Pitch` objects for the Producer. Each owns its own scope, its own per-user memory, and implements the shared `DataAgent` protocol. Per master P9: real agents with decision authority, not pipeline LLM calls.
 
-- `youtube_agent` (internal, user-selected) — YouTube subscriptions + recency signals
-- `calendar_agent` (internal, user-selected) — Google Calendar events (Takeout JSON on Day 0)
-- `weather_agent` (internal, user-selected) — Open-Meteo (free, no key)
-- `alices_agent` (external, Producer-invoked, has `price_usdc` + `wallet_address`) — @AlicesLens
+- `youtube_agent` (internal, user-selected) — YouTube subscriptions + recency signals (live OAuth)
+- `calendar_agent` (internal, user-selected) — Google Calendar events (live OAuth)
+- `weather_agent` (internal, user-selected) — Open-Meteo (free, no key; requires GPS location)
+- `alices_agent` (external, Producer-invoked, has `price_usdc` + `wallet_address`) — @AlicesLens (pre-captured data)
+
+## Agent Selection & Auth Sequence (decided 2026-04-16)
+
+The demo opens with an agent selection screen. The user (demonstrator) picks which agents to enable. Upon selection, auth/setup flows run **sequentially** in a fixed order:
+
+```
+Agent Selection Screen
+  |
+  +-- User picks agents (e.g. all four: YouTube, Calendar, Weather, Alice)
+  |
+  +-- Sequential auth (only for selected agents that need it):
+      |
+      1. YouTube OAuth  — google consent page opens, user approves youtube.readonly
+      |                    token stored at ~/.config/radio-podcast/youtube_token.json
+      |
+      2. Calendar OAuth — google consent page opens, user approves calendar.readonly
+      |                    token stored at ~/.config/radio-podcast/calendar_token.json
+      |
+      3. Weather GPS    — browser geolocation prompt, user approves location access
+      |                    lat/lon stored in user profile (in-memory for demo)
+      |
+      4. Alice        — no setup needed (pre-captured Day-0 data in repo)
+      |
+  +-- All auth complete → orchestrator runs episode generation
+```
+
+**Why sequential, not parallel:** Each auth step opens a browser popup/prompt. Parallel popups confuse users and may trigger browser popup blockers. Sequential is the honest UX — user sees each permission clearly.
+
+**Why this order:** YouTube is the highest-value agent (most data, longest OAuth flow). Calendar is the second Google OAuth. Weather GPS is instant (browser prompt, no redirect). Alice needs nothing. Front-loading the slower OAuth flows means the user isn't waiting at the end.
+
+**Demo moment:** The sequential auth IS the demo. Judge watches the demonstrator approve YouTube, then Calendar, then GPS — each time feeding real personal data into the system. By the time episode generation starts, every agent has live data. This is the "real agents with real data" thesis (P7, P9) made visible.
+
+**Skipped agents:** If the user doesn't select an agent, its auth step is skipped entirely. The orchestrator only runs agents that were selected. If an auth flow fails or is denied, that agent is excluded from the episode (graceful degradation, not a hard failure).
 
 ## Key premises (from master)
 
