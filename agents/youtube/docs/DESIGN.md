@@ -458,6 +458,13 @@ def pitch(brief: Brief, memory: AgentMemory, profile: InterestProfile,
         for T in candidates
     ]
 
+    # ── Sparse-topic guard ──
+    # Output contract requires 3–5 pitches or exactly 1 thin-signal.
+    # If fewer than 3 candidates survive scoring, the profile is too
+    # sparse for ranked topic pitches — emit thin-signal instead.
+    if len(bundle) < 3:
+        return [thin_signal_pitch(profile)]
+
     # ── Step 2: LLM — selection + articulation (bounded, no external calls) ──
     return llm.generate_pitches(bundle, brief)   # returns 3–5 Pitch objects
 ```
@@ -473,7 +480,7 @@ def pitch(brief: Brief, memory: AgentMemory, profile: InterestProfile,
 
 - **Input-bounded.** Candidates bundle + brief. **No external search, no web fetch, no agentic loop.** Content discovery (fresh articles, new videos, world news) is Producer's job, not the agent's. The agent knows the user; Producer knows the world. For the full rationale on why this boundary limits hallucination surface, see [`agents/docs/DESIGN.md` §Two-LLM boundary](../../docs/DESIGN.md#two-llm-boundary-why-agents-pitch-and-producer-scripts-decided-2026-04-16).
 - **Constraint: pick from the candidate set.** The LLM re-ranks, writes hooks, and selects 3–5, but cannot invent topics outside `bundle`. Otherwise the algo layer is decorative and the deterministic demo beat is undermined.
-- **Output contract (clarified 2026-04-15).** Either **3–5 topic `Pitch` objects** with `title`, `hook`, `priority ∈ [0, 1]`, `source_refs` (channel_ids / video_ids drawn from the topic's provenance), **or exactly 1 thin-signal `Pitch`** when `combined_topic_scores` is empty (zero-subs zero-likes user, or first-ever episode where API failure left `profile_state` empty). **Never any other cardinality.** Producer is responsible for handling the 1-pitch thin-signal case in its running-order assembly (e.g., let other agents fill the slot, or play a "let me learn about you" segment).
+- **Output contract (clarified 2026-04-15, revised 2026-04-16).** Either **3–5 topic `Pitch` objects** with `title`, `hook`, `priority ∈ [0, 1]`, `source_refs` (channel_ids / video_ids drawn from the topic's provenance), **or exactly 1 thin-signal `Pitch`**. **Never any other cardinality.** Thin-signal is emitted in two cases: (1) `combined_topic_scores` is empty (zero-subs zero-likes user, or first-ever episode where API failure left `profile_state` empty), or (2) fewer than 3 candidates survive the algo step (profile is non-empty but too sparse for ranked topic pitches — e.g., a user with only 1–2 unique topics after TF-IDF). The sparse-topic guard enforces the 3-pitch floor structurally rather than letting the LLM attempt to fill 3 slots from insufficient candidates. Producer is responsible for handling the 1-pitch thin-signal case in its running-order assembly (e.g., let other agents fill the slot, or play a "let me learn about you" segment).
 
 **Why this split:**
 
@@ -555,6 +562,8 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
 | Server API key (developer credential) | v0 + v1 | `channels.list?part=topicDetails` for any channel (public metadata) |
 
 **One consent prompt, one scope, one API, globally available.** No regional gating, no async archive, no upload, no verification gate (`youtube.readonly` is a common non-sensitive scope). **Project scope is internal hackathon, solo-dev** — Google's app verification (paperwork required at >100 users in production) is **out of v0/v1 scope and not on the critical path**. Testing-mode publishing covers the demo audience (dev + Alice + a handful of invited testers, all explicitly added as test users in the OAuth consent screen).
+
+**Demo auth flow (decided 2026-04-16):** YouTube OAuth is triggered inline when the user selects the YouTube agent on the agent selection screen. This is step 1 of the sequential auth flow (YouTube → Calendar → Weather GPS → Alice). The consent popup is visible to the demo audience — judge sees the demonstrator approve YouTube access, establishing the "real agents with real data" thesis before any episode is generated. See `agents/docs/DESIGN.md` §Agent Selection & Auth Sequence.
 
 **Token lifecycle (v0 scope):** one consent at OAuth flow start yields an access token (~1h) + refresh token. Access tokens silently rotate via refresh — no user re-prompt per episode. Relevant only for the 10-min demo window: one consent at session start covers everything. Dev-time caveat: while the OAuth consent screen is in Google's Testing publishing status, refresh tokens expire after 7 days, so the dev account re-consents weekly. Production-scale lifecycle (revocation, multi-device, long-lived storage) is deferred to v1; `youtube.readonly` testing-mode supports several users which covers v0 (dev + Alice + a handful of invited testers), and Google app verification (privacy policy, scope justification, demo video) is only required at the >100-user production threshold.
 
