@@ -45,6 +45,7 @@ class Pitch(TypedDict, total=False):
     agent: str                  # "youtube" | "calendar" | "weather" | "alices"
     title: str
     hook: str                   # creative brief for Producer — not spoken verbatim
+    data: dict                  # structured payload; agent-specific (e.g. calendar events)
     rationale: str
     source_refs: list[str]      # channel_ids / video_ids / etc.
     priority: float             # [0, 1]; higher = more important
