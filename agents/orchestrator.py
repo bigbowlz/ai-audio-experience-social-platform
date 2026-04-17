@@ -49,11 +49,12 @@ def _time_of_day(hour: int) -> str:
 def run_episode(
     agents: list[DataAgent],
     user_id: str,
-) -> dict[str, list[Pitch]]:
+) -> tuple[dict[str, list[Pitch]], Brief]:
     """Run one episode generation pass.
 
-    Returns a dict of {agent_name: list[Pitch]} for all participating agents.
-    Callers pass this to select_segments() and then to the Producer's LLM pass.
+    Returns (pitches_by_agent, brief) — the Brief assembled from Phase 1
+    is returned so callers can pass it to select_segments() and then to
+    the Producer's LLM pass without reconstructing it.
     """
     # ── Phase 1: parallel fetch_context + load_memory ────────────────
     # Both calls are parallel per agent; we wait for ALL before moving on.
@@ -110,7 +111,7 @@ def run_episode(
             name: f.result() for name, f in pitch_futures.items()
         }
 
-    return pitches_by_agent
+    return pitches_by_agent, brief
 
 
 # ── CLI ───────────────────────────────────────────────────────────────
@@ -140,7 +141,7 @@ if __name__ == "__main__":
         os.environ["DISABLE_LLM"] = "1"
 
     agents = _build_default_agents()
-    pitches_by_agent = run_episode(agents, user_id=args.user_id)
+    pitches_by_agent, brief = run_episode(agents, user_id=args.user_id)
 
     for agent_name, pitches in pitches_by_agent.items():
         print(f"── {agent_name} ({len(pitches)} pitch{'es' if len(pitches) != 1 else ''}) ──")
@@ -166,24 +167,6 @@ if __name__ == "__main__":
         print(json.dumps(selected, indent=2))
     else:
         from producer.script import generate_episode_script
-
-        # Reconstruct brief from the run — reuse orchestrator's Phase 1 output
-        now = datetime.now(timezone.utc)
-        brief: Brief = {"today_context": {
-            "date": now.date().isoformat(),
-            "day_of_week": now.strftime("%A"),
-            "time_of_day": _time_of_day(now.hour),
-            "weather_summary": None,
-            "calendar_events": None,
-        }}
-        # Pull weather/calendar from the actual agent pitches' context
-        for a in _build_default_agents():
-            if a.name == "weather":
-                brief["today_context"]["weather_summary"] = "partly cloudy, 18°C"
-            elif a.name == "calendar":
-                brief["today_context"]["calendar_events"] = [
-                    "Team standup 10am", "Lunch with Alex 12:30pm",
-                ]
 
         print("[orchestrator] Generating episode script via LLM …\n")
         try:
