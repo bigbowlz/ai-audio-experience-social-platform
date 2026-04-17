@@ -23,7 +23,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from agents.protocol import AgentMemory, Brief, DataAgent, Pitch, ScopeContext, TodayContext
@@ -72,7 +72,8 @@ def run_episode(
 
     # ── SYNC BARRIER: all fetch_context() done ────────────────────────
     # Assemble Brief.today_context from weather + calendar ScopeContext fields.
-    now = datetime.now(timezone.utc)
+    # Use local time so date/day/time_of_day reflect the user's wall clock.
+    now = datetime.now()
 
     weather_summary: str | None = None
     calendar_events: list[str] | None = None
