@@ -7,3 +7,6 @@ course.md
 .claude/*
 data/
 exports/
+**/.env
+# Google Calendar OAuth token (contains secrets)
+calendar_token.json
