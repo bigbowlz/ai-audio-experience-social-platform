@@ -168,3 +168,101 @@ class TestFetchContext:
         assert rich[0]["has_video_call"] is False
         assert rich[0]["organizer"] == ""
         assert rich[0]["duration_min"] == 60
+
+
+# ── pitch tests ──────────────────────────────────────────────────────
+
+
+class TestPitch:
+    """Tests for CalendarAgent.pitch()."""
+
+    @pytest.fixture
+    def brief(self) -> Brief:
+        return Brief(
+            today_context=TodayContext(
+                date="2026-04-16",
+                day_of_week="Thursday",
+                time_of_day="morning",
+                weather_summary="partly cloudy, 18°C",
+                calendar_events=["Team standup 10:00"],
+            )
+        )
+
+    def test_api_unreachable_pitch(self, agent: CalendarAgent, brief: Brief):
+        """api_reachable=False produces fallback pitch at priority 0.5."""
+        ctx = {"api_reachable": False, "calendar_events": [], "calendar_events_rich": []}
+        pitches = agent.pitch(brief, bootstrap_memory(), ctx, "dev")
+
+        assert len(pitches) == 1
+        p = pitches[0]
+        assert p["priority"] == 0.5
+        assert "Couldn't reach" in p["hook"]
+        assert p["claim_kind"] == "neutral"
+        assert p["thin_signal"] is False
+
+    def test_no_events_pitch(self, agent: CalendarAgent, brief: Brief):
+        """Empty calendar produces 'clear today' pitch at priority 0.5."""
+        ctx = {"api_reachable": True, "calendar_events": [], "calendar_events_rich": []}
+        pitches = agent.pitch(brief, bootstrap_memory(), ctx, "dev")
+
+        assert len(pitches) == 1
+        p = pitches[0]
+        assert p["priority"] == 0.5
+        assert "clear today" in p["hook"]
+
+    @pytest.mark.parametrize(
+        "event_count,expected_priority",
+        [
+            (1, 0.55),
+            (3, 0.55),
+            (4, 0.60),
+            (6, 0.60),
+            (7, 0.65),
+            (10, 0.65),
+        ],
+    )
+    def test_priority_by_event_count(
+        self, agent: CalendarAgent, brief: Brief, event_count: int, expected_priority: float
+    ):
+        """Priority scales with event count."""
+        rich = [
+            {
+                "summary": f"Event {i}",
+                "start": f"{9 + i}:00",
+                "end": f"{9 + i}:30",
+                "duration_min": 30,
+                "attendee_count": 2,
+                "is_recurring": False,
+                "has_video_call": False,
+                "organizer": "",
+            }
+            for i in range(event_count)
+        ]
+        ctx = {"api_reachable": True, "calendar_events": [], "calendar_events_rich": rich}
+        pitches = agent.pitch(brief, bootstrap_memory(), ctx, "dev")
+
+        assert len(pitches) == 1
+        assert pitches[0]["priority"] == expected_priority
+
+    def test_pitch_always_neutral_claim(self, agent: CalendarAgent, brief: Brief):
+        """Calendar pitch always has claim_kind='neutral'."""
+        rich = [{"summary": "Standup", "start": "10:00", "end": "10:30",
+                 "duration_min": 30, "attendee_count": 2, "is_recurring": True,
+                 "has_video_call": True, "organizer": "Alex"}]
+        ctx = {"api_reachable": True, "calendar_events": [], "calendar_events_rich": rich}
+        pitches = agent.pitch(brief, bootstrap_memory(), ctx, "dev")
+
+        assert pitches[0]["claim_kind"] == "neutral"
+        assert pitches[0]["provenance_shape"] == "balanced"
+        assert pitches[0]["thin_signal"] is False
+
+    def test_single_event_hook(self, agent: CalendarAgent, brief: Brief):
+        """Single event produces 'Just one thing' hook."""
+        rich = [{"summary": "1:1 with manager", "start": "14:00", "end": "14:30",
+                 "duration_min": 30, "attendee_count": 1, "is_recurring": True,
+                 "has_video_call": False, "organizer": ""}]
+        ctx = {"api_reachable": True, "calendar_events": [], "calendar_events_rich": rich}
+        pitches = agent.pitch(brief, bootstrap_memory(), ctx, "dev")
+
+        assert "Just one thing" in pitches[0]["hook"]
+        assert "1:1 with manager" in pitches[0]["hook"]
