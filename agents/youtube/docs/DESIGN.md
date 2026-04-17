@@ -150,7 +150,7 @@ stats: {
   "total_likes":           int,    # raw count of liked videos ingested
   "total_recent_weight":   float,  # sum of decayed like weights — confidence signal for recent window
   "unique_topics":         int,    # cardinality of (long_term_topic_scores ∪ recent_topic_scores)
-  "tag_coverage_pct":      float,  # % of entities (subs + videos) that returned non-empty topicDetails
+  "tag_coverage_pct":      float,  # 0–100 scale; % of entities (subs + videos) that returned non-empty topicDetails
   "avg_topics_per_entity": float,  # mean topic-list length — high values flag broad-term pollution
 }
 ```
@@ -432,15 +432,17 @@ if s > 0:
 `pitch()` is a two-step pipeline: a deterministic algo step assembles candidates, then a bounded LLM call articulates them into `Pitch` objects. Ordering, knobs, and LLM input shape are fixed here so `Pitch` generation doesn't drift across sessions.
 
 ```python
-def pitch(brief: Brief, memory: AgentMemory, profile: InterestProfile,
+def pitch(brief: Brief, memory: AgentMemory, context: ScopeContext,
           user_id: str) -> list[Pitch]:
+    profile: InterestProfile = context["profile"]
+
     # ── Empty-profile thin-signal short-circuit ──
     if not profile["combined_topic_scores"]:
         return [thin_signal_pitch(profile)]   # exactly 1 pitch; see §Output contract
 
     # ── Step 1: algo — candidate assembly (deterministic) ──
     score = {
-        T: profile["combined_topic_scores"][T] * memory.topic_multiplier.get(T, 1.0)
+        T: profile["combined_topic_scores"][T] * memory["topic_multiplier"].get(T, 1.0)
         for T in profile["combined_topic_scores"]
     }
     # top_n_seeded: returns min(n, len(score)) items; ties resolved by
@@ -453,7 +455,7 @@ def pitch(brief: Brief, memory: AgentMemory, profile: InterestProfile,
             "score": score[T],
             "long_term": profile["long_term_topic_scores"].get(T, 0.0),
             "recent":    profile["recent_topic_scores"].get(T, 0.0),
-            "provenance": profile["topic_provenance"][T],   # already K=5 capped
+            "provenance": profile["topic_provenance"].get(T, []),   # already K=5 capped; absent if no contributors survived filtering
         }
         for T in candidates
     ]
