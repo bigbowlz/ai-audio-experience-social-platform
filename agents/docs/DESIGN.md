@@ -190,8 +190,8 @@ Extended fields (set by the algo step in each agent's `pitch()`, not by the LLM)
 ## Success criteria
 
 - Each agent returns ≥1 valid `Pitch` on real data (no mocks)
-- Per-agent memory round-trips through Supabase `agent_memory` table
-- `alices_agent` has non-null `price_usdc=0.10` and `wallet_address` set to a Base Sepolia address you control
+- Internal agents (`youtube`, `calendar`, `weather`) memory round-trips through Supabase `agent_memory` table; external agents are exempt (fixed pre-captured data, learning loop does not apply)
+- `alices_agent` has non-null `price_usdc=0.10` and `wallet_address=0x8043AeeD92c681492B13f46e91EFb8B42D18E3b2` (Base Sepolia)
 - Tests lock the `DataAgent` protocol so future agents (roadmap) can't break the contract
 
 ## Reviewer concerns

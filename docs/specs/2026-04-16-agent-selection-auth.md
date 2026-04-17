@@ -2,10 +2,11 @@
 
 **Status:** APPROVED — brainstorming cleared 2026-04-16
 **Parent docs:**
+
 - Master: `~/.gstack/projects/bigbowlz-ai-audio-experience-social-platform/wanlizhou-main-design-20260413-182237.md` (P2, P7, P10)
 - Agents: `agents/docs/DESIGN.md` §Agent Selection & Auth Sequence
 - API: `api-storage/docs/DESIGN.md` §API routes
-**Scope:** demo (v0). Agent selection landing page + sequential OAuth/GPS auth flow before episode generation.
+  **Scope:** demo (v0). Agent selection landing page + sequential OAuth/GPS auth flow before episode generation.
 
 ## Purpose
 
@@ -72,13 +73,13 @@ New Next.js API routes in `api-storage/`:
 
 ### Key decisions
 
-| Decision | Choice | Why |
-|----------|--------|-----|
-| Server-side redirect (not popup) | Standard OAuth redirect flow | Avoids popup blockers. Google recommends redirect for web apps. |
-| Token stored on disk | `~/.config/radio-podcast/{youtube,calendar}_token.json` | Python agents already read from these paths. No DB for auth. Localhost single-user. |
-| Single Google Cloud OAuth client | One client ID, two separate consent redirects | Different scopes (`youtube.readonly` vs `calendar.readonly`). Sequential redirects = judge sees each permission individually. |
-| Weather GPS is browser-native | `navigator.geolocation.getCurrentPosition()` | No server round-trip. Stored in app state (in-memory for demo). |
-| Alice always "Ready" | Pre-captured Day-0 data in repo | No auth step. Card shows green badge. |
+| Decision                         | Choice                                                  | Why                                                                                                                           |
+| -------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Server-side redirect (not popup) | Standard OAuth redirect flow                            | Avoids popup blockers. Google recommends redirect for web apps.                                                               |
+| Token stored on disk             | `~/.config/radio-podcast/{youtube,calendar}_token.json` | Python agents already read from these paths. No DB for auth. Localhost single-user.                                           |
+| Single Google Cloud OAuth client | One client ID, two separate consent redirects           | Different scopes (`youtube.readonly` vs `calendar.readonly`). Sequential redirects = judge sees each permission individually. |
+| Weather GPS is browser-native    | `navigator.geolocation.getCurrentPosition()`            | No server round-trip. Stored in app state (in-memory for demo).                                                               |
+| Alice always "Ready"           | Pre-captured Day-0 data in repo                         | No auth step. Card shows green badge.                                                                                         |
 
 ## Frontend Auth Flow State Machine
 
@@ -99,6 +100,7 @@ IDLE
 Steps for unselected agents or agents with existing tokens are skipped.
 
 Each step shows a progress indicator on the agent card:
+
 - "Connecting YouTube..." -> checkmark
 - "Connecting Calendar..." -> checkmark
 - "Getting location..." -> checkmark
@@ -108,26 +110,26 @@ Each step shows a progress indicator on the agent card:
 
 Each card displays:
 
-| Field | YouTube | Calendar | Weather | Alice |
-|-------|---------|----------|---------|---------|
-| Icon | YouTube logo | Calendar icon | Weather icon | Alice avatar |
-| Name | @YouTube | @Calendar | @Weather | @AlicesLens |
-| Scope | "Your subscriptions & liked videos" | "Today's Google Calendar events" | "Local weather conditions" | "Alice's curated picks" |
-| Auth badge | "Connected" / "Not connected" | "Connected" / "Not connected" | "Location set" / "No location" | "Ready" (always) |
-| Toggle | on/off | on/off | on/off | on/off |
+| Field      | YouTube                             | Calendar                         | Weather                        | Alice                   |
+| ---------- | ----------------------------------- | -------------------------------- | ------------------------------ | ------------------------- |
+| Icon       | YouTube logo                        | Calendar icon                    | Weather icon                   | Alice avatar            |
+| Name       | @YouTube                            | @Calendar                        | @Weather                       | @AlicesLens             |
+| Scope      | "Your subscriptions & liked videos" | "Today's Google Calendar events" | "Local weather conditions"     | "Alice's curated picks" |
+| Auth badge | "Connected" / "Not connected"       | "Connected" / "Not connected"    | "Location set" / "No location" | "Ready" (always)          |
+| Toggle     | on/off                              | on/off                           | on/off                         | on/off                    |
 
 Cards default to all selected (demo flow: demonstrator picks all four).
 
 ## Error Handling
 
-| Failure | Behavior |
-|---------|----------|
-| User denies YouTube OAuth | Card shows "Skipped", removed from `selected_agents`, continue to next |
-| User denies Calendar OAuth | Card shows "Skipped", removed from `selected_agents`, continue to next |
-| User denies GPS | Card shows "Skipped", removed from `selected_agents`, continue to next |
-| OAuth callback error (network, Google error) | Card shows "Failed -- tap to retry", user can retry that agent |
-| All agents skipped/denied | "Generate" button disabled, message: "Select at least one agent" |
-| Token exists but expired | `/api/auth/status` returns false, auth flow re-triggers on Generate |
+| Failure                                      | Behavior                                                               |
+| -------------------------------------------- | ---------------------------------------------------------------------- |
+| User denies YouTube OAuth                    | Card shows "Skipped", removed from `selected_agents`, continue to next |
+| User denies Calendar OAuth                   | Card shows "Skipped", removed from `selected_agents`, continue to next |
+| User denies GPS                              | Card shows "Skipped", removed from `selected_agents`, continue to next |
+| OAuth callback error (network, Google error) | Card shows "Failed -- tap to retry", user can retry that agent         |
+| All agents skipped/denied                    | "Generate" button disabled, message: "Select at least one agent"       |
+| Token exists but expired                     | `/api/auth/status` returns false, auth flow re-triggers on Generate    |
 
 Graceful degradation: denied agents are excluded, episode generates with whatever remains.
 
@@ -136,7 +138,7 @@ Graceful degradation: denied agents are excluded, episode generates with whateve
 - **Python agents** read tokens from the same disk paths the auth callbacks write to. No new integration needed — `_load_credentials()` in each agent already handles these files.
 - **`POST /generate`** already accepts `selected_agents: string[]` (see `api-storage/docs/DESIGN.md`). The auth flow filters the list before calling generate.
 - **SSE stream** begins after auth completes. `episode.started` event includes `selected_agents` reflecting only the agents that passed auth.
-- **`scripts/calendar_auth.py`** and any future `scripts/youtube_auth.py` remain available as dev/testing fallbacks. The in-app flow supersedes them for demo use.
+- **`auth/calendar.py`** and any future `auth/youtube.py` remain available as dev/testing fallbacks. The in-app flow supersedes them for demo use.
 
 ## Open Questions
 
