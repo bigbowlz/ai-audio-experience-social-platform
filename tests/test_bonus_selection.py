@@ -357,3 +357,33 @@ class TestFallbackTieBreakDeterminism:
         assert len(bonus) == 1
         # calendar < youtube alphabetically, so calendar wins.
         assert bonus[0]["agent"] == "calendar"
+
+
+class TestStepOnePointFiveSSE:
+    """Decision 3d: producer.selecting.{started,done} + producer.pick events."""
+
+    def test_emits_started_then_picks_then_done(self, monkeypatch):
+        monkeypatch.setenv("DISABLE_LLM", "1")
+        from producer.events import EventBus, set_default_bus
+        from producer.bonus import select_bonus_with_events
+        bus = EventBus()
+        captured = []
+        bus.subscribe(lambda n, p: captured.append((n, p)))
+        set_default_bus(bus)
+        guaranteed = [_pitch("youtube", "yt-1", 0.9, seg_len=90)]
+        remaining = [_pitch("youtube", "yt-2", 0.7, seg_len=40)]
+        select_bonus_with_events(
+            guaranteed_slots=guaranteed,
+            remaining_pitches=remaining,
+            budget_remaining_sec=50,
+            today_context={
+                "date": "2026-04-17", "day_of_week": "Thursday",
+                "time_of_day": "morning", "weather_summary": None,
+                "calendar_events": None,
+            },
+        )
+        names = [n for n, _ in captured]
+        assert names[0] == "producer.selecting.started"
+        assert names[-1] == "producer.selecting.done"
+        assert all(n == "producer.pick" for n in names[1:-1])
+        assert len(names) == 1 + 1 + 1 + 1  # started + 1 guaranteed + 1 bonus + done
