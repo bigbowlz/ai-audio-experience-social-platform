@@ -427,8 +427,10 @@ Creates `./exports/` directory on first use. Both `./data/episodes/` and `./expo
 2. [Agents pitch, Producer selects, payment happens — ~15-25 sec]
    └─► Music bed plays throughout (user hears something, not silence)
 
-3. Producer.write_script() returns list[SegmentScript]
-   └─► TTSClient.synthesize(seg1) via batch API
+3. Producer.stream_episode_script() yields SegmentScript per segment
+   (AsyncIterator). generate_cold_open runs in parallel.
+   └─► audio.generate_episode_audio consumes the iterator
+       └─► TTSClient.synthesize(segment_0) — critical path
        └─► ~5-8 sec generation time (music bed covers the wait)
        └─► Write to disk, emit audio.segment.done {index: 0, url: "..."}
    └─► MusicFiller.duck() — crossfade out over 1500ms
@@ -465,7 +467,7 @@ Creates `./exports/` directory on first use. Both `./data/episodes/` and `./expo
 | `agents/youtube`                       | No direct dependency. Audio consumes script text, not agent output.                                                                                                                                                                                                       | Finalized (not relevant) |
 | `agents/docs/DESIGN.md`                | `Pitch` shape, `DataAgent` protocol. Not consumed directly by audio.                                                                                                                                                                                                      | Finalized (not relevant) |
 | `agents/docs/prompt_design.md`         | `EpisodeScript.segments[*].script` is the text audio consumes. Shape is defined here.                                                                                                                                                                                     | Finalized (binding)      |
-| `producer` (via `prompt_design.md` §4) | `write_script()` returns `list[SegmentScript]`. Audio consumes the `script` field from each `SegmentScript`. All segments available at once enables parallel batch dispatch. `select_segments()` and `EpisodeScript`/`SegmentScript` shapes locked in `prompt_design.md`. | Finalized (binding)      |
+| `producer` (via `prompt_design.md` §4) | `stream_episode_script()` yields `SegmentScript` per segment (`AsyncIterator`). Audio consumes the iterator via `generate_episode_audio`; segment 0 is critical path, segments 1-N fan out as they arrive. `generate_cold_open` / `generate_sign_off` are separate small calls composed by `pipeline.py`. `SegmentScript` shape locked in `prompt_design.md`. | Finalized (binding)      |
 
 ### Non-finalized (interfaces TBD when those components are designed)
 
