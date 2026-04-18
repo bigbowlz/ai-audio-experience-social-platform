@@ -212,6 +212,8 @@ Master's SSE schema reuses `agent.pitching.started` / `agent.pitch.emitted` / `a
 
 **Fix:** every `agent.pitching.*` event carries `phase: "internal" | "external"`. Coordinate with `api-storage`.
 
+**Resolved 2026-04-17:** `agent.pitching.{started,done}` carry `phase: "internal"|"external"` (see [`producer.events`](../../producer/events.py) wiring in `agents/orchestrator.py`).
+
 ### 3. Voice cloning risk (A-Scope, severity: low)
 
 Alice's voice-cloning on Day 0 is labeled fallback in master — if Alice declines or the sample is poor, use a stock ElevenLabs voice distinct from the narrator. No action required; already documented. Flagged here so `audio` component is aware.
