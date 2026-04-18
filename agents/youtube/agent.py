@@ -300,9 +300,11 @@ class YouTubeAgent:
             source_refs = []
             for c in contributors:
                 if c["kind"] == "sub":
-                    source_refs.append(c["channel_id"])
-                elif c["video_id"]:
-                    source_refs.append(c["video_id"])
+                    source_refs.append(c["channel_name"])
+                elif c["video_title"]:
+                    source_refs.append(c["video_title"])
+                else:
+                    source_refs.append(c["channel_name"])
 
             pitches_fallback.append(Pitch(
                 agent="youtube",

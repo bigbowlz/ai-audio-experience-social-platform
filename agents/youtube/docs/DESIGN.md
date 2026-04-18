@@ -211,7 +211,7 @@ class PitchEmission(TypedDict):
     segment_index:   int                  # position in the final running order
     agent:           str                  # "youtube", "calendar", "weather", "alices"
     topic:           str | None           # None for agents that don't do topic-level pitching
-    source_refs:     list[str]            # channel_ids / video_ids / etc., as emitted on the Pitch
+    source_refs:     list[str]            # human-readable channel_name / video_title strings, as emitted on the Pitch (for downstream LLM grounding)
     priority:        float                # the priority at which this pitch entered the running order
 
 class ReactionEvent(TypedDict):
@@ -482,7 +482,7 @@ def pitch(brief: Brief, memory: AgentMemory, context: ScopeContext,
 
 - **Input-bounded.** Candidates bundle + brief. **No external search, no web fetch, no agentic loop.** Content discovery (fresh articles, new videos, world news) is Producer's job, not the agent's. The agent knows the user; Producer knows the world. For the full rationale on why this boundary limits hallucination surface, see [`agents/docs/DESIGN.md` §Two-LLM boundary](../../docs/DESIGN.md#two-llm-boundary-why-agents-pitch-and-producer-scripts-decided-2026-04-16).
 - **Constraint: pick from the candidate set.** The LLM re-ranks, writes hooks, and selects 3–5, but cannot invent topics outside `bundle`. Otherwise the algo layer is decorative and the deterministic demo beat is undermined.
-- **Output contract (clarified 2026-04-15, revised 2026-04-16).** Either **3–5 topic `Pitch` objects** with `title`, `hook`, `priority ∈ [0, 1]`, `source_refs` (channel_ids / video_ids drawn from the topic's provenance), **or exactly 1 thin-signal `Pitch`**. **Never any other cardinality.** Thin-signal is emitted in two cases: (1) `combined_topic_scores` is empty (zero-subs zero-likes user, or first-ever episode where API failure left `profile_state` empty), or (2) fewer than 3 candidates survive the algo step (profile is non-empty but too sparse for ranked topic pitches — e.g., a user with only 1–2 unique topics after TF-IDF). The sparse-topic guard enforces the 3-pitch floor structurally rather than letting the LLM attempt to fill 3 slots from insufficient candidates. Producer is responsible for handling the 1-pitch thin-signal case in its running-order assembly (e.g., let other agents fill the slot, or play a "let me learn about you" segment).
+- **Output contract (clarified 2026-04-15, revised 2026-04-16).** Either **3–5 topic `Pitch` objects** with `title`, `hook`, `priority ∈ [0, 1]`, `source_refs` (human-readable channel names / video titles drawn from the topic's provenance, for downstream Producer LLM grounding — not opaque YouTube IDs), **or exactly 1 thin-signal `Pitch`**. **Never any other cardinality.** Thin-signal is emitted in two cases: (1) `combined_topic_scores` is empty (zero-subs zero-likes user, or first-ever episode where API failure left `profile_state` empty), or (2) fewer than 3 candidates survive the algo step (profile is non-empty but too sparse for ranked topic pitches — e.g., a user with only 1–2 unique topics after TF-IDF). The sparse-topic guard enforces the 3-pitch floor structurally rather than letting the LLM attempt to fill 3 slots from insufficient candidates. Producer is responsible for handling the 1-pitch thin-signal case in its running-order assembly (e.g., let other agents fill the slot, or play a "let me learn about you" segment).
 
 **Why this split:**
 
