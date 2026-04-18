@@ -17,13 +17,15 @@ from typing import TypedDict
 import anthropic
 
 from agents.protocol import Brief, Pitch, TodayContext
+from producer import DEFAULT_LLM_MODEL
 
 # ── Output types ─────────────────────────────────────────────────────
+
 
 class SegmentScript(TypedDict):
     agent: str
     pitch_title: str
-    segue_in: str           # empty for first segment
+    segue_in: str  # empty for first segment
     script: str
     estimated_length_sec: int
 
@@ -36,10 +38,12 @@ class EpisodeScript(TypedDict):
 
 # ── Constants ────────────────────────────────────────────────────────
 
-MODEL = os.environ.get("PRODUCER_LLM_MODEL", "claude-sonnet-4-20250514")
+MODEL = os.environ.get("PRODUCER_LLM_MODEL", DEFAULT_LLM_MODEL)
 MAX_TOKENS = 8192
 TARGET_EPISODE_SECS = 450
-_MIN_SCRIPT_CHARS = 20  # floor: handles "Mostly cloudy, 14C." minimum; shorter = parse artifact
+_MIN_SCRIPT_CHARS = (
+    20  # floor: handles "Mostly cloudy, 14C." minimum; shorter = parse artifact
+)
 
 # ── System prompt ────────────────────────────────────────────────────
 
@@ -86,7 +90,9 @@ Each segment in `selected_segments` carries these fields:
   Reference sparingly where natural ("a channel you've been subscribed to"). \
   Do not recite the full list.
 - `data` — structured payload from the agent. Per-agent crib below.
-- `priority`, `suggested_length_sec` — scheduling metadata, not script-level knobs.
+- `priority` — already consumed upstream (agent self-report weighted by \
+  Producer memory, used during Step-1 selection). Do not re-rank on it.
+- `suggested_length_sec` — scheduling metadata, not a script-level knob.
 - `claim_kind` — temporal framing permission. See claim_kind directives below.
 - `provenance_shape` — evidence framing permission. Already enforced by the \
   agent in the hook; informational here.
@@ -179,6 +185,7 @@ Return ONLY the JSON object — no markdown fences, no commentary.
 
 # ── Input formatting ─────────────────────────────────────────────────
 
+
 def _format_input(
     selected: list[Pitch],
     today_context: TodayContext,
@@ -192,19 +199,21 @@ def _format_input(
     """
     segments = []
     for p in selected:
-        segments.append({
-            "agent": p["agent"],
-            "title": p["title"],
-            "hook": p["hook"],
-            "rationale": p.get("rationale", ""),
-            "source_refs": p.get("source_refs", []),
-            "data": p.get("data", {}),
-            "priority": p["priority"],
-            "claim_kind": p.get("claim_kind", "neutral"),
-            "provenance_shape": p.get("provenance_shape", "balanced"),
-            "thin_signal": p.get("thin_signal", False),
-            "suggested_length_sec": p["suggested_length_sec"],
-        })
+        segments.append(
+            {
+                "agent": p["agent"],
+                "title": p["title"],
+                "hook": p["hook"],
+                "rationale": p.get("rationale", ""),
+                "source_refs": p.get("source_refs", []),
+                "data": p.get("data", {}),
+                "priority": p["priority"],
+                "claim_kind": p.get("claim_kind", "neutral"),
+                "provenance_shape": p.get("provenance_shape", "balanced"),
+                "thin_signal": p.get("thin_signal", False),
+                "suggested_length_sec": p["suggested_length_sec"],
+            }
+        )
 
     payload = {
         "selected_segments": segments,
@@ -215,6 +224,7 @@ def _format_input(
 
 
 # ── LLM call ─────────────────────────────────────────────────────────
+
 
 def generate_episode_script(
     selected: list[Pitch],
@@ -251,13 +261,15 @@ def generate_episode_script(
     # Validate structure
     segments: list[SegmentScript] = []
     for seg in data["segments"]:
-        segments.append(SegmentScript(
-            agent=seg["agent"],
-            pitch_title=seg["pitch_title"],
-            segue_in=seg.get("segue_in", ""),
-            script=seg["script"],
-            estimated_length_sec=seg.get("estimated_length_sec", 60),
-        ))
+        segments.append(
+            SegmentScript(
+                agent=seg["agent"],
+                pitch_title=seg["pitch_title"],
+                segue_in=seg.get("segue_in", ""),
+                script=seg["script"],
+                estimated_length_sec=seg.get("estimated_length_sec", 60),
+            )
+        )
 
     # Enforce "cannot drop segments" contract (prompt_design.md §4, constraint #1)
     input_keys = {(p["agent"], p["title"]) for p in selected}
@@ -265,9 +277,7 @@ def generate_episode_script(
     missing = input_keys - output_keys
     if missing:
         agents = [a for a, _ in missing]
-        raise ValueError(
-            f"LLM dropped {len(missing)} segment(s) from agents: {agents}"
-        )
+        raise ValueError(f"LLM dropped {len(missing)} segment(s) from agents: {agents}")
 
     # First segment must have empty segue_in — cold open includes the transition.
     if segments and segments[0]["segue_in"].strip():
