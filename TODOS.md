@@ -42,3 +42,24 @@ Deferred work tracked from design reviews. Each item includes context so someone
 **Cons:** ~20 lines in `select_segments()` to consume the signal, plus calendar emitting it. Requires a design decision about how much control calendar should have over other agents' segment lengths.
 **Depends on:** Calendar agent v0 (live API + LLM pitch) shipping first.
 **Context:** Design doc Approach C. The signal shape would be a new field in ScopeContext or a separate return value from pitch(). `select_segments()` currently has hardcoded `DEFAULT_SEGMENT_SEC` per agent — the tempo signal would dynamically adjust these based on calendar density.
+
+
+## Producer (from /brainstorming 2026-04-17)
+
+### Weather data digest before Producer prompt
+**Priority:** Medium (v1, when token cost matters)
+**What:** Producer's `_format_input` projects weather `Pitch.data` to a lean subset (`current`, `day_ahead`, `notable_facts`, `air_quality`, `location_name`) instead of passing the full 24-entry `hourly_forecast`.
+**Why:** v0 passes weather data verbatim — ~3-4k tokens per episode just on weather, most unused by a 45s segment. Cutting `hourly_forecast` and `day_past` saves ~60% of weather tokens with no semantic loss for typical episodes.
+**Pros:** Smaller prompts, faster generation, lower cost.
+**Cons:** Per-agent projection logic in Producer creates coupling. If marketplace agents arrive with token-heavy `data`, this becomes a 1-by-1 patch rather than a general solution. Consider whether to formalize with an agent-side `data_for_producer()` helper at that point.
+**Depends on:** Nothing. Drop-in change to `producer/script.py:_format_input`.
+**Context:** Brainstorming session 2026-04-17 picked verbatim pass-through (option A) for v0 simplicity. Q1 in that session.
+
+### Web search for thin_signal segments
+**Priority:** Low (v1, alongside the "what's new" feed)
+**What:** When a segment has `thin_signal: true` (especially youtube/alices), Producer LLM does a web search for trending content in a curated topic list (Music/Tech/Gaming/etc.) and uses results to ground the general-interest segment.
+**Why:** Thin-signal segments fall back to LLM priors today. Grounding in real trending content makes them more topical and useful.
+**Pros:** Better thin-signal experience. Aligns with prompt_design.md §3 "content discovery is Producer's job."
+**Cons:** New tool-use path (Claude web-search), new hallucination surface at the Producer layer (the layer the two-LLM boundary was designed to keep clean), latency hit (3-10s per search), and scope creep — once youtube has it, weather/calendar thin_signal cases will want it too.
+**Depends on:** prompt_design.md §Open Questions "Producer's 'what's new' feed (v1+)" — these should be designed together as one v1 feature.
+**Context:** Brainstorming session 2026-04-17. Design intent is to defer content discovery to a dedicated v1 design session, not add it ad-hoc inside Step 2.
