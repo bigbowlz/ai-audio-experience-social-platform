@@ -65,11 +65,16 @@ def run_episode(
     external_agents = external_agents or []
 
     # ── Internal round ────────────────────────────────────────────────
-    emit("agent.pitching.started", {"phase": "internal"})
+    # Gate emits on non-empty agent list: CLI calls run_episode a second time
+    # with internal_agents=[] for the external-only round, and a spurious
+    # empty internal pitching pair would mislead SSE/phase-tag consumers.
+    if internal_agents:
+        emit("agent.pitching.started", {"phase": "internal"})
     pitches_by_agent, brief = _run_pitch_round(
         internal_agents, user_id, phase="internal"
     )
-    emit("agent.pitching.done", {"phase": "internal"})
+    if internal_agents:
+        emit("agent.pitching.done", {"phase": "internal"})
 
     # ── External round (if any) ───────────────────────────────────────
     if external_agents:
