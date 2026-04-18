@@ -202,7 +202,11 @@ def _fallback_bonus_selection(
     segue_overhead_sec: int,
 ) -> list[Pitch]:
     selected: list[Pitch] = []
-    for pitch in sorted(remaining_pitches, key=lambda p: p["priority"], reverse=True):
+    # Decision 5a: deterministic across-agent tiebreaking.
+    for pitch in sorted(
+        remaining_pitches,
+        key=lambda p: (-p["priority"], p["agent"], p["title"]),
+    ):
         seg_len = _segment_length(pitch, length_overrides)
         cost = seg_len + segue_overhead_sec
         if budget >= cost:
