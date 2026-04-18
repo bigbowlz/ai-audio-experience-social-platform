@@ -290,10 +290,34 @@ if __name__ == "__main__":
     if args.no_llm:
         print("[orchestrator] --no-llm: skipping Producer script generation.")
         print(json.dumps(selected, indent=2))
+    elif os.environ.get("ELEVENLABS_API_KEY"):
+        import asyncio
+        import time
+        from pipeline import run_episode_pipeline
+
+        print("[orchestrator] Running full pipeline (script + audio) …\n")
+        try:
+            episode_id = f"ep-{int(time.time())}"
+            result = asyncio.run(run_episode_pipeline(selected, brief, episode_id))
+            print(f"── Cold open ──\n{result.cold_open}\n")
+            for seg_result in result.audio.segment_results:
+                print(
+                    f"  [segment {seg_result['segment_index']}] "
+                    f"{seg_result['url']} ({seg_result['duration_ms']}ms)"
+                )
+            if result.audio.episode_failed is not None:
+                print(f"\n[audio] episode failed: {result.audio.episode_failed.reason}")
+            if result.audio.skipped_segments:
+                print(f"\n[audio] skipped segments: {result.audio.skipped_segments}")
+            print(f"\n── Sign-off ──\n{result.sign_off}\n")
+        except Exception as e:
+            print(f"[orchestrator] Pipeline failed: {e}")
+            print("[orchestrator] Falling back to raw segment JSON.")
+            print(json.dumps(selected, indent=2))
     else:
         from producer.script import generate_episode_script
 
-        print("[orchestrator] Generating episode script via LLM …\n")
+        print("[orchestrator] No ELEVENLABS_API_KEY — script-only mode.\n")
         try:
             episode = generate_episode_script(selected, brief)
             print(json.dumps(episode, indent=2))
