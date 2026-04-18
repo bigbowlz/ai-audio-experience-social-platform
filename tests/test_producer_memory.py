@@ -438,6 +438,33 @@ class TestBuildMemoryAppliedEvent:
         # agent_weights still includes alices for UI reconciliation.
         assert "alices" in event["agent_weights"]
 
+    def test_emit_memory_applied_silent_when_weights_empty(self):
+        """Bootstrap users emit nothing — silent identity transform."""
+        from producer.events import EventBus, set_default_bus
+        bus = EventBus()
+        captured = []
+        bus.subscribe(lambda n, p: captured.append((n, p)))
+        set_default_bus(bus)
+        raw = {"youtube": [_pitch("youtube", "a", 0.9)]}
+        adj = raw
+        from producer.memory import emit_memory_applied
+        emit_memory_applied(bootstrap_producer_memory(), raw, adj)
+        assert captured == []
+
+    def test_emit_memory_applied_fires_when_weights_present(self):
+        from producer.events import EventBus, set_default_bus
+        bus = EventBus()
+        captured = []
+        bus.subscribe(lambda n, p: captured.append((n, p)))
+        set_default_bus(bus)
+        raw = {"youtube": [_pitch("youtube", "a", 0.9)]}
+        adj = apply_producer_memory(raw, _mem({"youtube": 1.5}))
+        from producer.memory import emit_memory_applied
+        emit_memory_applied(_mem({"youtube": 1.5}), raw, adj)
+        assert len(captured) == 1
+        assert captured[0][0] == "producer.memory.applied"
+        assert captured[0][1]["agent_weights"] == {"youtube": 1.5}
+
 
 # ── Bootstrap + load ──────────────────────────────────────────────────
 

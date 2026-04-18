@@ -157,20 +157,14 @@ if __name__ == "__main__":
     # pure transform on `priority`. See producer/docs/DESIGN.md.
     from producer.memory import (
         apply_producer_memory,
-        build_memory_applied_event,
+        emit_memory_applied,
         load_producer_memory,
     )
 
     producer_memory = load_producer_memory(args.user_id)
     raw_pitches_by_agent = pitches_by_agent
     pitches_by_agent = apply_producer_memory(pitches_by_agent, producer_memory)
-    memory_event = build_memory_applied_event(
-        producer_memory, raw_pitches_by_agent, pitches_by_agent
-    )
-    if memory_event is not None:
-        print("── producer.memory.applied ──")
-        print(json.dumps(memory_event, indent=2))
-        print()
+    emit_memory_applied(producer_memory, raw_pitches_by_agent, pitches_by_agent)
 
     # ── Step 1: deterministic Phase 1 — guaranteed slots ────────────
     from producer.segments import select_guaranteed_slots
