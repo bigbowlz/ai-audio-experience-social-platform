@@ -57,7 +57,7 @@ log = logging.getLogger(__name__)
 
 MODEL = os.environ.get("PRODUCER_LLM_MODEL", DEFAULT_LLM_MODEL)
 MAX_TOKENS = 1024
-_TIMEOUT_SEC = 5.0
+_TIMEOUT_SEC = 20.0
 _MAX_RETRIES = 1
 
 
@@ -282,7 +282,7 @@ def select_bonus_segments_llm(
     )
 
     llm_result: BonusSelectionResult | None = None
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(max_retries=0)
 
     for attempt in range(1 + _MAX_RETRIES):
         try:
