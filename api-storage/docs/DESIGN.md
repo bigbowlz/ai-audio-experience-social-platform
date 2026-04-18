@@ -25,7 +25,7 @@ The integration spine. Every other component wires through here:
 // → text/event-stream (SSE)
 // Emits events in master's SSE event schema.
 // Generates episode end-to-end: pitch round → producer decision → payment → external pitch
-//   → select → write_script → streaming TTS → disk write.
+//   → select → stream_episode_script → (cold_open in parallel) → generate_episode_audio (iterator-fed TTS) → sign_off.
 
 // POST /react { episode_id, event: SignalEvent }
 // → 200 OK
