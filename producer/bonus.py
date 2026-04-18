@@ -250,6 +250,9 @@ def select_bonus_segments_llm(
     bonus_pitches: selected bonus pitches with suggested_length_sec and
         reasoning_summary set.
     guaranteed_pick_reasons: PickReason per guaranteed slot.
+
+    Note: returns plain list[Pitch] for bonus segments. Callers wrap into
+    a RunningOrder via producer.segments.append_bonus().
     """
     if os.environ.get("DISABLE_LLM"):
         return (
