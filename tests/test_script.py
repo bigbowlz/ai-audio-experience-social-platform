@@ -259,3 +259,40 @@ class TestValidation:
         with patch("producer.script.anthropic.Anthropic", return_value=_mock_client(bad_response)):
             with pytest.raises(ValueError, match=r"youtube"):
                 generate_episode_script(pitches, _BRIEF)
+
+
+# ── Group D: happy path ───────────────────────────────────────────────
+
+
+class TestHappyPath:
+    def test_well_formed_response_passes(self):
+        """A complete, valid 2-segment EpisodeScript returns successfully with the expected shape."""
+        pitches = [
+            _full_pitch(agent="weather", title="Weather in SF"),
+            _full_pitch(agent="youtube", title="Jazz exploration"),
+        ]
+        good_response = _episode_response([
+            _segment_response(
+                agent="weather",
+                title="Weather in SF",
+                segue_in="",  # required empty for first
+                script="Currently 55F and rainy in San Francisco. Highs near 60 today.",
+                estimated_length_sec=45,
+            ),
+            _segment_response(
+                agent="youtube",
+                title="Jazz exploration",
+                segue_in="From the weather, let's pivot to something for your ears.",
+                script="You've been getting into jazz lately — Coltrane Live at Birdland turned up in a recent like.",
+                estimated_length_sec=90,
+            ),
+        ])
+        with patch("producer.script.anthropic.Anthropic", return_value=_mock_client(good_response)):
+            result = generate_episode_script(pitches, _BRIEF)
+        assert result["cold_open"].startswith("Good morning")
+        assert result["sign_off"].startswith("That's the show")
+        assert len(result["segments"]) == 2
+        assert result["segments"][0]["segue_in"] == ""
+        assert result["segments"][0]["agent"] == "weather"
+        assert result["segments"][1]["agent"] == "youtube"
+        assert result["segments"][1]["estimated_length_sec"] == 90
