@@ -1,6 +1,6 @@
 # Agent: `weather_agent`
 
-**Status:** APPROVED — office-hours design cleared 2026-04-16
+**Status:** APPROVED — office-hours design cleared 2026-04-16; updated 2026-04-17 to replace `daily` with time-aware `day_past` + `day_ahead`, and refine notable-fact summaries (peak-mm precipitation event, tomorrow labels for wrapped hours, UV night-time suppression)
 **Parent component doc:** [`../../docs/DESIGN.md`](../../docs/DESIGN.md) — `agents` component (shared `DataAgent` protocol, memory shape, `Pitch` shape)
 **Session artifact:** `~/.gstack/projects/bigbowlz-ai-audio-experience-social-platform/wanlizhou-main-design-20260416-203021.md`
 **Scope:** demo (v0). Live Open-Meteo API + deterministic narrative summary + notable-facts ranking.
@@ -39,8 +39,9 @@ fetch_context(user_id)
       {
         "weather_summary": str,                    # narrative for Brief
         "current": CurrentConditions,
-        "hourly_forecast": list[HourlyForecast],   # next 24h
-        "daily": DailySummary,
+        "hourly_forecast": list[HourlyForecast],   # next 24h from current hour
+        "day_past": DayPast,                       # what already happened today
+        "day_ahead": DayAhead,                     # what's still coming today
         "air_quality": AirQuality | None,
         "notable_facts": list[WeatherFact],        # top 3
         "location_name": str,
@@ -72,8 +73,9 @@ pitch(brief, memory, context, user_id)
                 ==================================================
   Open-Meteo                        weather_agent
   +--------------+   GET /forecast   +----------------------------+
-  | /v1/forecast | ----------------> | parse current, hourly,     |
-  +--------------+                   | daily into typed dicts     |
+  | /v1/forecast | ----------------> | parse current, hourly;     |
+  +--------------+                   | split into day_past +      |
+                                     | day_ahead via current_hour |
                                      +----------------------------+
   +-----------------+  GET /air-q    +----------------------------+
   | /v1/air-quality | ------------> | parse AQI, PM2.5, PM10     |
@@ -146,7 +148,8 @@ WMO_CONDITIONS = {
 ```python
 class WeatherFact(TypedDict):
     category: str          # "uv" | "wind" | "temperature" | "precipitation" | "air_quality" | "visibility"
-    summary: str           # "UV index peaks at 8 (very high) around 13:00"
+    summary: str           # e.g. "UV index peaks at 8 (very high) around 13:00"
+                           #      "Rain starting around 23:00, heaviest around 2:00 tomorrow (7.8 mm, 84% chance)"
     severity: str          # "info" | "notable" | "warning"
     hour: int | None       # hour of peak relevance, if applicable
 
@@ -179,20 +182,28 @@ class AirQuality(TypedDict):
     pm10: float
     category: str          # "good" | "fair" | "moderate" | "poor" | "very_poor"
 
-class DailySummary(TypedDict):
-    high_c: float
-    low_c: float
-    sunrise: str           # "06:42"
-    sunset: str            # "19:58"
-    max_uv: float
-    total_precipitation_mm: float
-    dominant_condition: str
+class DayPast(TypedDict):
+    """What has already happened today. Fields are None when the event is still upcoming."""
+    sunrise: str | None              # "06:42" if sunrise_hour <= current_hour, else None
+    high_f: float | None             # daily high if current_hour >= 15 (peak likely passed), else None
+    precipitation_mm_so_far: float   # sum of hourly precipitation for hours 0..current_hour
+
+class DayAhead(TypedDict):
+    """Forward-looking view of what's still coming today. Producer builds segments from this."""
+    high_f: float | None             # max temperature across hourly_forecast (next 24h)
+    low_f: float | None              # min temperature across hourly_forecast
+    hours_remaining: int             # len(hourly_forecast) — may be < 24 at end of day
+    sunset: str | None               # "19:58" if sunset_hour > current_hour, else None
+    total_precipitation_mm: float    # full-day forecast total (can't be split; not "remaining")
+    dominant_condition: str          # full-day dominant condition (WMO-mapped)
+    max_uv: float                    # full-day peak UV (may be past or future)
 
 class WeatherScopeContext(TypedDict):
     weather_summary: str              # narrative summary for Brief.today_context
     current: CurrentConditions
     hourly_forecast: list[HourlyForecast]  # next 24h from current hour
-    daily: DailySummary
+    day_past: DayPast                 # replaces old `daily` (time-aware)
+    day_ahead: DayAhead               # replaces old `daily` (time-aware)
     air_quality: AirQuality | None    # None when AQ fetch fails; see Fallback Behavior table
     notable_facts: list[WeatherFact]  # top 3 most interesting observations
     location_name: str                # "San Francisco, CA" or similar
@@ -203,28 +214,42 @@ class WeatherScopeContext(TypedDict):
 
 Deterministic function, no LLM. Takes weather data, outputs a 2-3 sentence summary highlighting the most radio-interesting facts.
 
-**Length target:** 2 sentences if 0-1 notable facts, 3 sentences if 2+ notable facts. Maximum ~60 words. Always start with current conditions ("Currently Xc and [condition]"), then notable facts by severity.
+**Length target:** 2 sentences if 0-1 notable facts, 3 sentences if 2+ notable facts. Maximum ~60 words. Always start with current conditions ("Currently XF and [condition]"), then notable facts by severity.
+
+**Time-aware fallback (zero notable facts):** Derive remaining-day high/low from `day_ahead`, not the old full-day `daily` block. Sentence reads "Expecting highs near XF, lows around YF" to signal forward-looking intent. Guard: if `day_ahead.hours_remaining < 2` (late night), suppress the high/low sentence and fall back to "Conditions look steady" — one remaining hour is not a meaningful day picture.
 
 **Interestingness scoring** (per observable):
 
 | Observable | Threshold | Severity |
 |------------|-----------|----------|
-| Temperature swing > 8C in 24h | high-low delta | notable |
+| Temperature swing > 15F (forward 24h) | day_ahead high-low delta | notable |
 | UV index >= 6 | WHO "high" | notable |
 | UV index >= 8 | WHO "very high" | warning |
 | Wind > 40 km/h | Beaufort 6 "strong breeze" | notable |
 | AQI > 50 | European "fair" threshold | notable |
 | AQI > 100 | European "poor" | warning |
-| Precipitation probability > 60% | any hour | notable |
+| Precipitation probability > 60% | qualifying hour | notable |
 | Visibility < 5 km | reduced | notable |
 | Feels-like diverges from actual by > 5C | current OR max in next 6h | notable |
 
+**Summary phrasing rules:**
+
+- **Precipitation.** Collect hours with `precipitation_probability > 60`. Anchor the fact on the **peak-mm** hour (max `precipitation_mm`; Python `max()` yields the first maximum, giving natural earliest-hour tiebreak). If the first qualifying hour differs from the peak hour, include both: *"Rain starting around H1:00, heaviest around H2:00 (X.X mm, Y% chance)"*. Otherwise report the single hour. Include the `mm` amount only when `>= 0.1`; below that, fall back to the probability-only form.
+- **UV suppression.** Skip UV facts when `day_ahead.sunset is None` (sun already set) AND the peak hour has wrapped into tomorrow (see below). Tomorrow's UV preview is stale context at night.
+- **Tomorrow labels.** `hourly_forecast` starts at the current hour and wraps past midnight. Any entry whose `hour` is numerically less than `hourly_forecast[0].hour` is **tomorrow**. Summaries must render these as `"{hour}:00 tomorrow"` via `_time_label(hour, first_hour)`. Applied to UV, precipitation (start and peak), and wind summaries.
+- **Temperature swing.** Do not use the word "today" — the 24h window straddles midnight at evening runs. Phrase as *"Temperature swings XF, from LF to HF"*.
+
 **Sort order** (fully deterministic): severity (warning > notable > info), then specificity (has specific hour > general), then category in canonical order: precipitation > uv > wind > temperature > air_quality > visibility.
 
-**Example:**
+**Example (morning run, current_hour=10):**
 - Input: temp 22C, UV 8 at 13:00, rain 70% at 17:00, AQI 35, wind 15 km/h
 - Notable facts: [UV very high at 13:00, rain likely at 17:00, temp comfortable at 22C]
 - Narrative: "Currently 22C and sunny. UV peaks at 8 around 13:00, so sunscreen's a good call. Rain rolls in around 17:00 with a 70% chance. Otherwise mild with light winds."
+
+**Example (evening run, current_hour=22):**
+- Input: drizzle starts 23:00 (0.5mm), peak 02:00 tomorrow (7.8mm, 84%), UV peak 13:00 tomorrow, sunset past
+- Notable facts: precipitation (peak-mm anchored) only; UV suppressed
+- Narrative: "Currently 70F and partly cloudy. Rain starting around 23:00, heaviest around 2:00 tomorrow (7.8 mm, 84% chance). Temperature swings 30F, from 40F to 70F."
 
 ## Pitch Generation
 
@@ -296,6 +321,10 @@ The weather agent reads lat/lon from user profile. The location approval flow is
 - **UV index sourcing:** Not available in Open-Meteo's `current` block. Source from `hourly.uv_index[current_hour_index]`.
 - **Visibility units:** Open-Meteo returns meters. Divide by 1000 for `visibility_km`.
 - **Hourly window:** `forecast_days=2` returns 48 hours. `timezone=auto` means `hourly.time[0]` is local midnight. Current hour index = current local hour (0-23). Slice `hourly[current_hour_index : current_hour_index + 24]` for the next 24h window.
+- **Day-block split:** `_parse_day_blocks(daily, hourly_forecast, past_precip_mm, current_hour)` returns `(day_past, day_ahead)`. Inputs: the already-parsed full-day aggregates, the next-24h hourly slice, and the sum of past hourly precipitation (hours 0..current_hour from `raw_hourly["precipitation"]`). `_PEAK_HOUR_THRESHOLD = 15`: daily high is considered "past" after 15:00 local. Empty `hourly_forecast` (end of day) degrades to `day_ahead.high_f = day_ahead.low_f = None`.
+- **Time labels:** `_time_label(hour, first_hour)` renders `"{hour}:00"` or `"{hour}:00 tomorrow"` based on whether the hour has wrapped past midnight. `first_hour = hourly_forecast[0]["hour"]`. Used by UV, precipitation, and wind summaries so the LLM downstream and human readers can't mistake tomorrow for past-today.
+- **UV night-suppression:** When `day_ahead.sunset is None` AND UV peak hour `< first_hour` (wrapped into tomorrow), skip the UV fact. Editorial: tomorrow's UV preview is not actionable context for a night-time brief.
+- **Timezone assumption:** `_current_hour()` uses `datetime.now().hour` (system local time). Since Open-Meteo is called with `timezone=auto`, its hourly indices match the user's configured location timezone. These can diverge if the system clock timezone differs from the configured location — out of scope for demo.
 - **AQI categories:** European AQI: good (0-20), fair (21-40), moderate (41-60), poor (61-80), very_poor (81+).
 - **Runtime type note:** `context` in `pitch()` is a plain `dict` at runtime. Use `.get()` with defaults for all field access to handle partial failure cases.
 
@@ -315,7 +344,7 @@ The orchestrator copies `WeatherScopeContext["weather_summary"]` into `Brief.tod
 
 ## Open Questions
 
-1. **Timezone handling.** Open-Meteo's `timezone=auto` returns local times. Verify that hourly data aligns with user's local clock for "rain at 15:00" statements.
+1. **Timezone handling.** Open-Meteo's `timezone=auto` returns local times. Verify that hourly data aligns with user's local clock for "rain at 15:00" statements. Same caveat applies to `_parse_day_blocks` — see Implementation Notes.
 2. **Approach C upgrade path.** Weather event classification (`weather_arc`, `weather_event_type`) is a natural v1 extension. The `notable_facts` infrastructure is the foundation for C's event classifier.
 
 ## Deferred to v1
