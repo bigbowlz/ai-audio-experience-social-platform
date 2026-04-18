@@ -82,6 +82,8 @@ Master says `write_script()` is one structured-output LLM call. On Monday LLM lo
 - Segments 2-N stream in background while segment 1 plays
 - Each segment is its own structured-output call with a tight JSON schema (less room for malformed retry)
 
+**Resolved 2026-04-17:** implemented as `stream_episode_script(...) -> AsyncIterator[SegmentScript]` in [`producer/script.py`](../script.py); per-segment LLM calls; first-segment critical-path emits `script.segment.done` SSE event for audio handoff. See `docs/specs/2026-04-17-producer-alignment-plan.md` Phase 3.
+
 ### 2. Episode B has NO pre-cached fallback (severity: CRITICAL) — B-1
 
 Episode A has a full auto-switch fallback (pre-cached SSE replay + cached MP3 + pre-captured payment tx). Episode B has nothing. If Minute 6-8 budget breaches, there's no safety net.
