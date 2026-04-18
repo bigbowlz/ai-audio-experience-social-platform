@@ -13,15 +13,17 @@ The Producer is a distinct component (not a prompt pretending to be one) that:
 4. Triggers agentic payment via the `payment` component
 5. Reads the external agent's pitches
 6. Runs `select()` over the full pitch pool, producing a `RunningOrder`
-7. Runs `write_script()` → Script (per-segment in P13 streaming flow)
+7. Runs the script surface — `stream_episode_script()` emits per-segment `SegmentScript`s via async iterator, with `generate_cold_open()` and `generate_sign_off()` as separate small LLM calls (`generate_episode_script()` is the sync back-compat collector). Each segment is one `generate_segment()` call.
 8. Owns Producer-memory (pacing preferences; independent of domain-agent memory)
+
+The CLI and future api-storage consume the above via the shared `pipeline.py` module at repo root, which composes `generate_cold_open` → `stream_episode_script` (streamed into `audio.generate_episode_audio`) → `generate_sign_off`.
 
 ## Key premises
 
 - **P8** Live gen first, cached fallback (with honest labeling)
 - **P9** Producer is distinct component; memory-blind by design (invariant)
 - **P10** External-agent invocation + agentic payment is Producer's call, not user's
-- **P13** Streaming segment TTS → `write_script()` emits per-segment not monolithic
+- **P13** Streaming segment TTS → `stream_episode_script()` emits per-segment not monolithic
 
 ## Interface contract
 
@@ -41,8 +43,31 @@ class Producer:
         """Picks subset fitting total duration, allocates per-agent airtime, orders.
         Sees only the scalar `priority` on each Pitch (memory-isolation invariant)."""
 
-    def write_script(order: RunningOrder, contexts: dict[str, ScopeContext]) -> AsyncIterator[SegmentScript]:
-        """Emits segments one at a time. Segment 1 first for P13 streaming."""
+    # NOTE: the script surface (below) lives as module-level async functions in
+    # producer/script.py — not methods on a Producer class. Shown here in the same
+    # pseudocode block for interface-contract clarity.
+
+# producer/script.py (module-level async functions)
+
+async def stream_episode_script(selected: list[Pitch], brief: Brief) -> AsyncIterator[SegmentScript]:
+    """Emits segments one at a time via async iterator. Segment 0 is critical-path
+    under P13 (first audio within ~6–10s); segments 1..N stream in the background
+    while segment 0 plays. Emits `script.segment.done` SSE per segment and enforces
+    cannot-drop-segments at the end."""
+
+async def generate_segment(segment: Pitch, brief: Brief, is_first: bool) -> SegmentScript:
+    """Single structured-output LLM call producing one SegmentScript with a tight
+    JSON schema (less room for malformed retry than a monolithic episode call)."""
+
+async def generate_cold_open(selected: list[Pitch], brief: Brief) -> str:
+    """Separate small LLM call — 10–15s spoken cold open including transition into segment 0."""
+
+async def generate_sign_off(brief: Brief) -> str:
+    """Separate small LLM call — ~10s spoken sign-off."""
+
+def generate_episode_script(selected: list[Pitch], brief: Brief) -> EpisodeScript:
+    """Sync back-compat collector. Runs `generate_cold_open`, drains
+    `stream_episode_script`, and runs `generate_sign_off`."""
 ```
 
 **RunningOrder shape:** see master.
@@ -60,9 +85,9 @@ class Producer:
 
 ## Build plan touchpoints
 
-- **Day 1:** Stub Producer. `select()` picks top-N by priority fitting total_length_sec budget. `write_script()` emits segments as one structured-output call (monolithic). CLI prints valid RunningOrder JSON. End-to-end works.
+- **Day 1:** Stub Producer. `select()` picks top-N by priority fitting total_length_sec budget. Script generation emits segments as one structured-output call (monolithic `write_script()`, historical). CLI prints valid RunningOrder JSON. End-to-end works.
 - **Day 4:** External-invocation decision (unconditional), marketplace stub (hardcoded candidates), `select_external()` → @AlicesLens. Wire payment call between internal pitches and external pitch.
-- **Day 5 (STRETCH):** Producer-memory inter-agent weights (`agent_weights` driven by like/replay/skip, see §Producer-memory learning rule). Refactor `write_script()` to per-segment async iterator for P13 streaming.
+- **Day 5 (STRETCH):** Producer-memory inter-agent weights (`agent_weights` driven by like/replay/skip, see §Producer-memory learning rule). Refactor script generation to per-segment async iterator (`stream_episode_script()`) for P13 streaming.
 
 ## Success criteria
 
@@ -74,15 +99,16 @@ class Producer:
 
 ### 1. `write_script()` monolithic call risks Minute 6-8 beat (severity: CRITICAL) — B-1
 
-Master says `write_script()` is one structured-output LLM call. On Monday LLM load + one malformed-JSON retry, Episode B live regen blows the 75-sec budget. Screen sits on "writing script..." while builder narrates over silence. The whole "compounding personalization" beat dies.
+The original `write_script()` interface from master was one structured-output LLM call. On Monday LLM load + one malformed-JSON retry, Episode B live regen blows the 75-sec budget. Screen sits on "writing script..." while builder narrates over silence. The whole "compounding personalization" beat dies.
 
-**Fix (Day 5 morning, hard requirement):**
-- Split `write_script()` into per-segment async iterator
-- Segment 1 is critical-path under P13 (target ~3-5s LLM + ~3-5s TTS = ~6-10s to first audio)
-- Segments 2-N stream in background while segment 1 plays
-- Each segment is its own structured-output call with a tight JSON schema (less room for malformed retry)
+**Fix (Day 5 morning, hard requirement — as planned):**
+- Split the monolithic script call into a per-segment async iterator (`stream_episode_script()`)
+- Segment 0 is critical-path under P13 (target ~3-5s LLM + ~3-5s TTS = ~6-10s to first audio)
+- Segments 1-N stream in background while segment 0 plays
+- Each segment is its own structured-output call (`generate_segment()`) with a tight JSON schema (less room for malformed retry)
+- Cold open and sign-off are split out into their own small LLM calls (`generate_cold_open()`, `generate_sign_off()`), sized ≤400 tokens each
 
-**Resolved 2026-04-17:** implemented as `stream_episode_script(...) -> AsyncIterator[SegmentScript]` in [`producer/script.py`](../script.py); per-segment LLM calls; first-segment critical-path emits `script.segment.done` SSE event for audio handoff. See `docs/specs/2026-04-17-producer-alignment-plan.md` Phase 3.
+**Resolved 2026-04-17:** implemented as `stream_episode_script(...) -> AsyncIterator[SegmentScript]` in [`producer/script.py`](../script.py); per-segment LLM calls via `generate_segment()`; `generate_cold_open()` / `generate_sign_off()` as separate small calls; `generate_episode_script()` retained as sync back-compat collector. First-segment critical-path emits `script.segment.done` SSE event for audio handoff. Composed end-to-end by the shared [`pipeline.py`](../../pipeline.py) module at repo root (CLI + future api-storage). See `docs/specs/2026-04-17-producer-alignment-plan.md` Phase 3.
 
 ### 2. Episode B has NO pre-cached fallback (severity: CRITICAL) — B-1
 
