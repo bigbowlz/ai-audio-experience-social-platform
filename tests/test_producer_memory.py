@@ -251,7 +251,7 @@ class TestPipelineBonusSlotFlip:
         )
         guaranteed = order["segments"]
         with patch.dict(os.environ, {"DISABLE_LLM": "1"}):
-            bonus, _ = select_bonus_segments_llm(
+            bonus, _, _ = select_bonus_segments_llm(
                 guaranteed_slots=guaranteed,
                 remaining_pitches=remaining,
                 budget_remaining_sec=budget_override,

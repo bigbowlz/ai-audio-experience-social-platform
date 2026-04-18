@@ -115,7 +115,7 @@ class TestLLMSuccessPath:
 
         mock = _mock_client(_bonus_result(guaranteed, ["Web3 skepticism"], ["youtube"]))
         with patch("producer.bonus.anthropic.Anthropic", return_value=mock):
-            bonus, _ = select_bonus_segments_llm(
+            bonus, _, _ = select_bonus_segments_llm(
                 guaranteed_slots=guaranteed,
                 remaining_pitches=remaining,
                 budget_remaining_sec=budget,
@@ -136,7 +136,7 @@ class TestLLMSuccessPath:
             _bonus_result(guaranteed, ["Nonexistent Topic"], ["youtube"])
         )
         with patch("producer.bonus.anthropic.Anthropic", return_value=mock):
-            bonus, _ = select_bonus_segments_llm(
+            bonus, _, _ = select_bonus_segments_llm(
                 guaranteed_slots=guaranteed,
                 remaining_pitches=remaining,
                 budget_remaining_sec=budget,
@@ -163,7 +163,7 @@ class TestLLMSuccessPath:
             )
         )
         with patch("producer.bonus.anthropic.Anthropic", return_value=mock):
-            bonus, _ = select_bonus_segments_llm(
+            bonus, _, _ = select_bonus_segments_llm(
                 guaranteed_slots=guaranteed,
                 remaining_pitches=remaining,
                 budget_remaining_sec=budget,
@@ -181,7 +181,7 @@ class TestLLMSuccessPath:
         ]
         mock = _mock_client(_bonus_result(guaranteed, [], []))
         with patch("producer.bonus.anthropic.Anthropic", return_value=mock):
-            _, guaranteed_reasons = select_bonus_segments_llm(
+            _, guaranteed_reasons, _ = select_bonus_segments_llm(
                 guaranteed_slots=guaranteed,
                 remaining_pitches=[],
                 budget_remaining_sec=0,
@@ -201,7 +201,7 @@ class TestFallbackPath:
         guaranteed: list[dict],
         remaining: list[dict],
         budget: int,
-    ) -> tuple[list[dict], list[PickReason]]:
+    ) -> tuple[list[dict], list[PickReason], str]:
         mock = _timeout_client(n_failures=2)
         with patch("producer.bonus.anthropic.Anthropic", return_value=mock):
             return select_bonus_segments_llm(
@@ -218,7 +218,7 @@ class TestFallbackPath:
             _pitch("calendar", "Standup prep", 0.70, seg_len=30),
             _pitch("alices", "PG essay", 0.85, seg_len=90),
         ]
-        _, guaranteed_reasons = self._run_with_timeout(guaranteed, [], 0)
+        _, guaranteed_reasons, _ = self._run_with_timeout(guaranteed, [], 0)
 
         assert len(guaranteed_reasons) == 4
         agents = {r["agent"] for r in guaranteed_reasons}
@@ -233,14 +233,14 @@ class TestFallbackPath:
         # 30 + 10 = 40 cost; budget = 50 → exactly one fits
         budget = 50
 
-        bonus, _ = self._run_with_timeout(guaranteed, remaining, budget)
+        bonus, _, _ = self._run_with_timeout(guaranteed, remaining, budget)
 
         assert len(bonus) == 1
         assert bonus[0]["title"] == "High priority"
 
     def test_fallback_guaranteed_reasoning_summary_format(self):
         guaranteed = [_pitch("youtube", "Jazz exploration", 0.91, seg_len=90)]
-        _, guaranteed_reasons = self._run_with_timeout(guaranteed, [], 0)
+        _, guaranteed_reasons, _ = self._run_with_timeout(guaranteed, [], 0)
 
         assert guaranteed_reasons[0]["reasoning_summary"] == "youtube: guaranteed slot"
 
@@ -249,7 +249,7 @@ class TestFallbackPath:
         remaining = [_pitch("alices", "PG essay", 0.85, seg_len=30)]
         budget = 50
 
-        bonus, _ = self._run_with_timeout(guaranteed, remaining, budget)
+        bonus, _, _ = self._run_with_timeout(guaranteed, remaining, budget)
 
         assert len(bonus) == 1
         # Fallback format: "{agent}: {title}"
@@ -270,7 +270,7 @@ class TestDeterminism:
         for _ in range(2):
             mock = _mock_client(response)
             with patch("producer.bonus.anthropic.Anthropic", return_value=mock):
-                bonus, reasons = select_bonus_segments_llm(
+                bonus, reasons, _ = select_bonus_segments_llm(
                     guaranteed_slots=guaranteed,
                     remaining_pitches=remaining,
                     budget_remaining_sec=budget,
@@ -301,7 +301,7 @@ class TestBudgetGate:
             )
         )
         with patch("producer.bonus.anthropic.Anthropic", return_value=mock):
-            bonus, _ = select_bonus_segments_llm(
+            bonus, _, _ = select_bonus_segments_llm(
                 guaranteed_slots=guaranteed,
                 remaining_pitches=remaining,
                 budget_remaining_sec=budget,
@@ -318,7 +318,7 @@ class TestBudgetGate:
 
         mock = _mock_client(_bonus_result(guaranteed, ["Any topic"], ["youtube"]))
         with patch("producer.bonus.anthropic.Anthropic", return_value=mock):
-            bonus, _ = select_bonus_segments_llm(
+            bonus, _, _ = select_bonus_segments_llm(
                 guaranteed_slots=guaranteed,
                 remaining_pitches=remaining,
                 budget_remaining_sec=0,
@@ -344,7 +344,7 @@ class TestFallbackTieBreakDeterminism:
             _pitch("calendar", "c1", 0.5, seg_len=40),
         ]
         from producer.bonus import select_bonus_segments_llm
-        bonus, _ = select_bonus_segments_llm(
+        bonus, _, _ = select_bonus_segments_llm(
             guaranteed_slots=guaranteed,
             remaining_pitches=remaining,
             budget_remaining_sec=50,  # exactly one (40 + 10 segue)
@@ -387,3 +387,38 @@ class TestStepOnePointFiveSSE:
         assert names[-1] == "producer.selecting.done"
         assert all(n == "producer.pick" for n in names[1:-1])
         assert len(names) == 1 + 1 + 1 + 1  # started + 1 guaranteed + 1 bonus + done
+
+    def test_selecting_started_forwards_llm_overall_reasoning_verbatim(self):
+        """Regression: producer.selecting.started must carry the LLM's
+        overall_reasoning verbatim, not a slice of the first guarantee.
+
+        Spec: agents/docs/prompt_design.md:510-513.
+        """
+        from producer.bonus import select_bonus_with_events
+        from producer.events import EventBus, set_default_bus
+
+        bus = EventBus()
+        captured: list[tuple[str, dict]] = []
+        bus.subscribe(lambda n, p: captured.append((n, p)))
+        set_default_bus(bus)
+
+        guaranteed = [_pitch("youtube", "Jazz exploration", 0.91, seg_len=90)]
+        remaining = [_pitch("youtube", "Web3 skepticism", 0.72, seg_len=40)]
+        distinctive = "rainy morning -> introspective picks"
+        payload = _bonus_result(guaranteed, ["Web3 skepticism"], ["youtube"])
+        payload["overall_reasoning"] = distinctive
+
+        mock = _mock_client(payload)
+        with patch("producer.bonus.anthropic.Anthropic", return_value=mock):
+            select_bonus_with_events(
+                guaranteed_slots=guaranteed,
+                remaining_pitches=remaining,
+                budget_remaining_sec=60,
+                today_context=_TODAY,
+            )
+
+        started = [p for n, p in captured if n == "producer.selecting.started"]
+        assert len(started) == 1
+        assert started[0]["reasoning_summary"] == distinctive
+        # Guarantee reasoning_summary strings must NOT leak into the started event.
+        assert "strong signal" not in started[0]["reasoning_summary"]

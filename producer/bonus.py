@@ -232,6 +232,9 @@ def _find_in_remaining(title: str, remaining: list[Pitch]) -> Pitch | None:
 # ── Public function ───────────────────────────────────────────────────
 
 
+_FALLBACK_OVERALL_REASONING = "selecting segments by priority within time budget"
+
+
 def select_bonus_segments_llm(
     guaranteed_slots: list[Pitch],
     remaining_pitches: list[Pitch],
@@ -239,7 +242,7 @@ def select_bonus_segments_llm(
     today_context: TodayContext,
     segue_overhead_sec: int = SEGUE_OVERHEAD_SECS,
     length_overrides: dict[str, int] | None = None,
-) -> tuple[list[Pitch], list[PickReason]]:
+) -> tuple[list[Pitch], list[PickReason], str]:
     """Pick bonus segments via LLM; fall back to priority-sort on failure.
 
     ProducerMemory is NOT a parameter: it has already been applied to
@@ -247,10 +250,13 @@ def select_bonus_segments_llm(
     the LLM would be "reasoning theater" — deterministic behavior must
     live in a pure function, not a prompt.
 
-    Returns (bonus_pitches, guaranteed_pick_reasons).
+    Returns (bonus_pitches, guaranteed_pick_reasons, overall_reasoning).
     bonus_pitches: selected bonus pitches with suggested_length_sec and
         reasoning_summary set.
     guaranteed_pick_reasons: PickReason per guaranteed slot.
+    overall_reasoning: the LLM's ≤80-char summary for the whole selection,
+        forwarded verbatim to producer.selecting.started. Fallback paths
+        return a fixed deterministic string per prompt_design.md:510-513.
 
     Note: returns plain list[Pitch] for bonus segments. Callers wrap into
     a RunningOrder via producer.segments.append_bonus().
@@ -264,6 +270,7 @@ def select_bonus_segments_llm(
                 segue_overhead_sec,
             ),
             _fallback_guaranteed_reasons(guaranteed_slots),
+            _FALLBACK_OVERALL_REASONING,
         )
 
     user_msg = _format_input(
@@ -301,6 +308,7 @@ def select_bonus_segments_llm(
                 segue_overhead_sec,
             ),
             _fallback_guaranteed_reasons(guaranteed_slots),
+            _FALLBACK_OVERALL_REASONING,
         )
 
     # Code-side budget enforcement — validate titles and enforce budget
@@ -325,7 +333,11 @@ def select_bonus_segments_llm(
             )
             budget -= cost
 
-    return bonus_selected, llm_result["guaranteed_pick_reasons"]
+    return (
+        bonus_selected,
+        llm_result["guaranteed_pick_reasons"],
+        llm_result["overall_reasoning"],
+    )
 
 
 def select_bonus_with_events(
@@ -341,7 +353,7 @@ def select_bonus_with_events(
     Spec: agents/docs/prompt_design.md §4 Step 1.5 SSE integration
           producer/docs/DESIGN.md §SSE
     """
-    bonus, guaranteed_reasons = select_bonus_segments_llm(
+    bonus, guaranteed_reasons, overall_reasoning = select_bonus_segments_llm(
         guaranteed_slots=guaranteed_slots,
         remaining_pitches=remaining_pitches,
         budget_remaining_sec=budget_remaining_sec,
@@ -350,11 +362,7 @@ def select_bonus_with_events(
         length_overrides=length_overrides,
     )
 
-    overall = (
-        guaranteed_reasons[0]["reasoning_summary"][:80]
-        if guaranteed_reasons else "selecting segments by priority within time budget"
-    )
-    emit("producer.selecting.started", {"reasoning_summary": overall})
+    emit("producer.selecting.started", {"reasoning_summary": overall_reasoning})
 
     for slot, reason in zip(guaranteed_slots, guaranteed_reasons):
         emit("producer.pick", {
