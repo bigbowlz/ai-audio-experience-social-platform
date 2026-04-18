@@ -245,3 +245,17 @@ class TestValidation:
         with patch("producer.script.anthropic.Anthropic", return_value=_mock_client(bad_response)):
             with pytest.raises(ValueError, match=r"Jazz exploration"):
                 generate_episode_script(pitches, _BRIEF)
+
+    def test_drops_segment_raises(self):
+        """LLM response missing a segment raises ValueError naming the dropped agent."""
+        pitches = [
+            _full_pitch(agent="weather", title="Weather in SF"),
+            _full_pitch(agent="youtube", title="Jazz exploration"),
+        ]
+        # Response only contains weather; youtube is dropped.
+        bad_response = _episode_response([
+            _segment_response(agent="weather", title="Weather in SF"),
+        ])
+        with patch("producer.script.anthropic.Anthropic", return_value=_mock_client(bad_response)):
+            with pytest.raises(ValueError, match=r"youtube"):
+                generate_episode_script(pitches, _BRIEF)
