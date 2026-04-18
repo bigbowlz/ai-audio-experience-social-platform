@@ -550,13 +550,14 @@ Producer's LLM receives:
             "agent": "youtube",
             "title": "Jazz exploration",
             "hook": "...",                  # agent's creative brief — not spoken verbatim
-            "suggested_length_sec": 90,     # assigned by Producer from DEFAULT_SEGMENT_SEC
-            "rationale": "...",
-            "source_refs": [...],
+            "rationale": "...",             # why the agent selected this topic
+            "source_refs": [...],           # human-readable channel/video names
+            "data": {...},                  # structured agent payload (e.g., weather facts, calendar events)
             "priority": 0.91,
             "claim_kind": "rising",
             "provenance_shape": "balanced",
             "thin_signal": false,
+            "suggested_length_sec": 90,     # assigned by Producer from DEFAULT_SEGMENT_SEC
         },
         # ... one per selected segment
     ],
@@ -568,7 +569,11 @@ Producer's LLM receives:
         "calendar_events": ["Team standup 10am", "Dentist 3pm"],
     },
     "target_total_secs": 450,
-    "producer_memory": { ... },     # stub — cross-episode ordering priors, learning-loop session
+    # NOTE: producer_memory is NOT in this payload.
+    # Per feedback_producer_memory_deterministic.md and
+    # docs/specs/2026-04-17-producer-step2-prompt.md §D1, ProducerMemory
+    # is applied as a pure function upstream (priority scaling at Step 1/1.5,
+    # opener-preference reordering before Step 2 sees selected_segments).
 }
 ```
 
@@ -580,6 +585,10 @@ Producer's LLM receives:
 4. **Today's context** should be woven into cold open and segues where natural. Do not force-fit weather into every segue — use it where it adds texture.
 5. **Segment ordering heuristics** (guidance, not hard rules): time-sensitive content first (calendar, weather), taste content after (youtube, alices). Within taste segments, `rising`/`discovery` claim_kinds are more narratively interesting as middle-of-show energy; `durable` works as a comfortable closer.
 6. **Respect `claim_kind` and `provenance_shape`** per segment — do not add temporal claims the agent's hook didn't make. If `claim_kind` is `neutral`, the segment script should be factual, not enthusiastic.
+7. **First segment's `segue_in` is empty.** The cold open includes the transition into segment 1. Enforced by post-parse validation in `generate_episode_script`.
+8. **Per-agent `data` cribs.** weather → use `current`, `day_ahead`, `notable_facts`, `air_quality`, `location_name` (ignore `hourly_forecast` / `day_past` unless surfacing a specific hour matters); calendar → use `events[]` (`summary`, `start`, `end`, `duration_min`, etc.); youtube/alices → `data` is usually empty.
+9. **Hook vs. data layering.** For taste agents (youtube, alices): hook + `claim_kind` cap phrasing; `data` is read-only context for tone calibration only. For context agents (weather, calendar): `data` is the content source; `hook` is a one-line summary.
+10. **`thin_signal` handling.** When `thin_signal: true`, write a general-interest segment in the agent's domain. Optional one-sentence factual close per agent (youtube/alices: "more personal as your YouTube activity grows"; weather: "Local forecast wasn't available today"). No action prompts. Calendar never emits `thin_signal` in v0.
 
 **Output schema:**
 
@@ -599,11 +608,16 @@ class SegmentScript(TypedDict):
 
 **Producer does not emit `priority` or modify `Pitch` fields.** The `EpisodeScript` is a new object, not a mutation of the input pitches. Pitch objects remain immutable after agent emission.
 
-### Producer memory (stub — deferred to learning-loop session)
+### Producer memory (applied deterministically upstream — not in Step 2 prompt)
 
-Producer reads `producer_memory` at script-time. This memory tracks cross-episode ordering priors (e.g., "user tends to skip weather segments on weekends" → lower weather priority on Saturdays). The memory shape, write rules, and update signals are deferred to the learning-loop design session. For v0, `producer_memory` is an empty dict and the LLM operates without cross-episode priors.
+Step 2's LLM does NOT receive `producer_memory`. Per `feedback_producer_memory_deterministic.md` and `docs/specs/2026-04-17-producer-step2-prompt.md` §D1, `ProducerMemory` is applied as a pure function upstream of any LLM pass:
 
-**What Producer memory is NOT:** it is not per-agent memory. Producer never reads `AgentMemory` (per P9 — Producer is memory-blind to agent-level state). Producer's memory is about _episode-level_ patterns (ordering preferences, segment-skip patterns, time-of-day habits), not user taste.
+- Agent weights (priority modifiers) are applied at Step 1 / Step 1.5 — Step 2 sees the resulting priorities baked in.
+- Opener-preference reordering happens before `generate_episode_script()` is called — `selected_segments` arrives pre-sorted with the preferred opener at index 0.
+
+Step 2's LLM operates on already-nudged inputs. No `producer_memory` dict in the payload.
+
+**What Producer memory is NOT:** it is not per-agent memory. Producer never reads `AgentMemory` (per P9 — Producer is memory-blind to agent-level state). Producer's memory is about _episode-level_ patterns (ordering preferences, segment-skip patterns, time-of-day habits), not user taste. The shape and update rules belong to the learning-loop session.
 
 ### Rejected alternatives
 
@@ -650,6 +664,7 @@ The deterministic functions in this doc are the guardrails that prevent hook hal
 | `compute_provenance_shape()`             | All 3 shapes (balanced, sub_only, like_only)                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `select_segments()`                      | Phase 1 guaranteed slots + Phase 2 bonus by priority + budget exhaustion + thin-signal pitch handling + `MAX_SEGMENT_SEC` clamping + cold-open-has-no-segue arithmetic + `DEFAULT_SEGMENT_SEC` applied when no overrides + `length_overrides` respected when provided                                                                                                                                                                              |
 | `select_bonus_segments_llm()` (Step 1.5) | LLM success path: bonus picks accepted within budget + title-mismatch logged and skipped + cheap pitch after expensive miss still accepted; fallback path (LLM timeout): all guaranteed slots present + bonus filled by priority-sort + reasoning_summary is `"{agent}: {title}"`; empty `producer_memory` `{}`: output deterministic for same inputs; budget gate: LLM-nominated pitch that exceeds budget is rejected without blocking next pick |
+| `generate_episode_script()` (Step 2) | Payload shape: all 11 Pitch fields per segment + defaults for missing optionals + `data` round-trips verbatim + no `producer_memory` key. SYSTEM_PROMPT content: claim_kind directive table, field legend, per-agent data crib, thin_signal handling, hook-vs-data layering rule. Validation: drop-segments raises (existing) + first-segment `segue_in` non-empty raises + segment script < 20 chars raises. Happy path: well-formed 2-segment response returns valid `EpisodeScript`. See `tests/test_script.py`. |
 
 ## Open questions (parked)
 
