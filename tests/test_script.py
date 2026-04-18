@@ -226,3 +226,22 @@ class TestValidation:
         with patch("producer.script.anthropic.Anthropic", return_value=_mock_client(bad_response)):
             with pytest.raises(ValueError, match=r"segue_in"):
                 generate_episode_script(pitches, _BRIEF)
+
+    def test_short_script_raises(self):
+        """Segment script shorter than 20 chars raises ValueError naming the segment."""
+        pitches = [
+            _full_pitch(agent="weather", title="Weather in SF"),
+            _full_pitch(agent="youtube", title="Jazz exploration"),
+        ]
+        bad_response = _episode_response([
+            _segment_response(agent="weather", title="Weather in SF"),
+            _segment_response(
+                agent="youtube",
+                title="Jazz exploration",
+                segue_in="And here's some music.",
+                script="Hi.",  # too short
+            ),
+        ])
+        with patch("producer.script.anthropic.Anthropic", return_value=_mock_client(bad_response)):
+            with pytest.raises(ValueError, match=r"Jazz exploration"):
+                generate_episode_script(pitches, _BRIEF)

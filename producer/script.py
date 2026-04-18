@@ -39,6 +39,7 @@ class EpisodeScript(TypedDict):
 MODEL = os.environ.get("PRODUCER_LLM_MODEL", "claude-sonnet-4-20250514")
 MAX_TOKENS = 8192
 TARGET_EPISODE_SECS = 450
+_MIN_SCRIPT_CHARS = 20  # floor: handles "Mostly cloudy, 14C." minimum; shorter = parse artifact
 
 # ── System prompt ────────────────────────────────────────────────────
 
@@ -274,6 +275,14 @@ def generate_episode_script(
             f"First segment must have empty segue_in (cold open includes the "
             f"transition). Got: {segments[0]['segue_in']!r}"
         )
+
+    # Every segment script must be substantive (guards against empty/parse-artifact responses).
+    for i, seg in enumerate(segments):
+        if len(seg["script"].strip()) < _MIN_SCRIPT_CHARS:
+            raise ValueError(
+                f"Segment {i} ({seg['agent']}/{seg['pitch_title']}) script too short: "
+                f"{len(seg['script'])} chars (min {_MIN_SCRIPT_CHARS})"
+            )
 
     return EpisodeScript(
         cold_open=data["cold_open"],
