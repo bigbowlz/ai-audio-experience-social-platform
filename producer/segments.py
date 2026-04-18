@@ -1,9 +1,9 @@
-"""Deterministic segment selection prelude for the Producer.
+"""Deterministic segment selection — Phase 1 (guaranteed slots) only.
 
-Pure function — no I/O, no LLM. Selects which pitches make the
-running order and assigns time budgets.
+Pure function — no I/O, no LLM. Selects one pitch per agent and computes
+the seconds available for Step 1.5 (LLM bonus selection, see producer/bonus.py).
 
-Spec: agents/docs/prompt_design.md §4
+Spec: agents/docs/prompt_design.md §4 Step 1
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 from agents.protocol import Pitch
 
 
-TARGET_EPISODE_SECS = 360
+TARGET_EPISODE_SECS = 450
 SEGUE_OVERHEAD_SECS = 10
 OPEN_CLOSE_SECS = 25
 MAX_SEGMENT_SEC = 90
@@ -42,46 +42,47 @@ def _segment_length(pitch: Pitch, overrides: dict[str, int] | None = None) -> in
     return min(raw, MAX_SEGMENT_SEC)
 
 
-def select_segments(
+def select_guaranteed_slots(
     pitches_by_agent: dict[str, list[Pitch]],
     length_overrides: dict[str, int] | None = None,
-) -> list[Pitch]:
-    """Select segments for the episode running order.
+) -> tuple[list[Pitch], list[Pitch], int]:
+    """Phase 1 (deterministic): one guaranteed slot per agent.
 
-    Phase 1: one guaranteed slot per agent (highest priority pitch).
-    Phase 2: bonus slots from remaining pitches by priority, within budget.
+    Returns:
+        guaranteed: highest-priority pitch per agent with suggested_length_sec set.
+        remaining: unselected pitches with suggested_length_sec set; candidates
+            for Step 1.5 (LLM bonus selection).
+        budget_remaining_sec: seconds available for bonus slots, after
+            open/close, guaranteed segments, and Phase 1 segues.
 
-    ``length_overrides`` lets the caller override the default per-agent
-    segment lengths (e.g. from Producer memory or user preferences).
+    Budget math:
+        TARGET_EPISODE_SECS - OPEN_CLOSE_SECS
+          - sum(guaranteed suggested_length_sec)
+          - SEGUE_OVERHEAD_SECS * (len(guaranteed) - 1)
+
+    The segue count is N-1 because the cold open already includes the
+    transition into segment 1 (OPEN_CLOSE_SECS covers that).
     """
-    selected: list[Pitch] = []
-    remaining: dict[str, list[Pitch]] = {}
+    guaranteed: list[Pitch] = []
+    remaining: list[Pitch] = []
 
-    # Phase 1: guaranteed slot — one per agent (highest priority)
-    for agent, pitches in pitches_by_agent.items():
-        best = max(pitches, key=lambda p: p["priority"])
-        seg_len = _segment_length(best, length_overrides)
-        clamped = {**best, "suggested_length_sec": seg_len}
-        selected.append(clamped)
-        remaining[agent] = [p for p in pitches if p is not best]
+    # Sort agents deterministically so iteration order doesn't depend on dict insertion.
+    for agent in sorted(pitches_by_agent):
+        pitches = pitches_by_agent[agent]
+        # Deterministic max: highest priority, then title ASC as final tiebreaker.
+        best = min(pitches, key=lambda p: (-p["priority"], p["title"]))
+        guaranteed.append(
+            {**best, "suggested_length_sec": _segment_length(best, length_overrides)}
+        )
+        for p in pitches:
+            if p is best:
+                continue
+            remaining.append(
+                {**p, "suggested_length_sec": _segment_length(p, length_overrides)}
+            )
 
-    # Phase 2: bonus slots — highest priority across all remaining pitches
     budget = TARGET_EPISODE_SECS - OPEN_CLOSE_SECS
-    budget -= sum(p["suggested_length_sec"] for p in selected)
-    # N segments need N-1 segues (cold open transitions into segment 1)
-    budget -= SEGUE_OVERHEAD_SECS * (len(selected) - 1)
+    budget -= sum(p["suggested_length_sec"] for p in guaranteed)
+    budget -= SEGUE_OVERHEAD_SECS * max(0, len(guaranteed) - 1)
 
-    all_remaining = sorted(
-        [p for ps in remaining.values() for p in ps],
-        key=lambda p: p["priority"],
-        reverse=True,
-    )
-
-    for pitch in all_remaining:
-        seg_len = _segment_length(pitch, length_overrides)
-        cost = seg_len + SEGUE_OVERHEAD_SECS
-        if budget >= cost:
-            selected.append({**pitch, "suggested_length_sec": seg_len})
-            budget -= cost
-
-    return selected
+    return guaranteed, remaining, budget
