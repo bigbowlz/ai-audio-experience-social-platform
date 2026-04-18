@@ -156,6 +156,47 @@ class TestExternalPhaseEvents:
         # Brief is assembled once in the internal round and reused.
         assert "today_context" in brief
 
+    def test_empty_internal_emits_no_internal_pitching(self) -> None:
+        """Empty internal_agents must not emit a spurious internal pitching pair.
+
+        CLI invokes run_episode twice: first with internals, then with
+        internal_agents=[] and external_agents=[AlicesAgent()] for the
+        external-only round. The second call must not fire empty
+        agent.pitching.{started,done} with phase=internal.
+        """
+        bus = EventBus()
+        captured: list[tuple[str, dict]] = []
+        bus.subscribe(lambda name, payload: captured.append((name, payload)))
+        set_default_bus(bus)
+        try:
+            externals = [_make_stub_agent("alices")]
+            run_episode(internal_agents=[], external_agents=externals, user_id="test")
+        finally:
+            set_default_bus(EventBus())
+
+        pitching = [(n, p) for n, p in captured if n.startswith("agent.pitching.")]
+        internal_events = [(n, p) for n, p in pitching if p.get("phase") == "internal"]
+        assert internal_events == [], (
+            f"expected zero internal pitching events, got {internal_events!r}"
+        )
+        # External round still fires normally.
+        assert ("agent.pitching.started", {"phase": "external"}) in pitching
+        assert ("agent.pitching.done", {"phase": "external"}) in pitching
+
+    def test_empty_internal_and_empty_external_emits_nothing(self) -> None:
+        """Both lists empty → zero agent.pitching.* events of any phase."""
+        bus = EventBus()
+        captured: list[tuple[str, dict]] = []
+        bus.subscribe(lambda name, payload: captured.append((name, payload)))
+        set_default_bus(bus)
+        try:
+            run_episode(internal_agents=[], external_agents=None, user_id="test")
+        finally:
+            set_default_bus(EventBus())
+
+        pitching = [(n, p) for n, p in captured if n.startswith("agent.pitching.")]
+        assert pitching == [], f"expected zero pitching events, got {pitching!r}"
+
     def test_external_round_reuses_internal_brief(self) -> None:
         """External agent's pitch() receives the same Brief built during internal round."""
         bus = EventBus()
