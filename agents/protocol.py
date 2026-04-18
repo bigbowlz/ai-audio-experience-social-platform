@@ -54,6 +54,43 @@ class Pitch(TypedDict, total=False):
     provenance_shape: str       # "balanced" | "sub_only" | "like_only"
 
 
+# ── RunningOrder: Producer's selected segments + episode-level metadata ──
+
+class RunningOrder(TypedDict):
+    """Producer's output of select_guaranteed_slots + select_bonus_segments_llm.
+
+    Replaces the implicit `list[Pitch]` running-order shape used through 2026-04-17.
+    The same Pitch objects appear under `segments`; the wrapper carries
+    episode-level metadata that today's tuple returns smuggle separately.
+    """
+    segments: list[Pitch]              # ordered: guaranteed first, then bonus
+    total_sec: int                     # sum of suggested_length_sec for all segments
+    guaranteed_count: int              # how many of `segments` are guaranteed
+    bonus_count: int                   # len(segments) - guaranteed_count
+
+
+# ── ExternalDecision: Producer's call on whether to invoke an external agent ──
+
+class ExternalDecision(TypedDict):
+    """Result of producer.external.decide_external_invocation()."""
+    decision: str                      # "invoke" | "skip"; v0 always "invoke"
+    rationale: str                     # human-readable; surfaced in SSE event payload
+
+
+# ── CreatorAgentListing: marketplace entry for an external agent ──
+
+class CreatorAgentListing(TypedDict):
+    """Result of producer.external.query_marketplace().
+
+    v0 reads a hardcoded list. v1 queries a real marketplace.
+    """
+    handle: str                        # "@AlicesLens"
+    display_name: str                  # "Alice's Lens"
+    scope: str                         # human-readable scope description
+    price_usdc: float                  # demo: 0.10
+    wallet_address: str                # Base Sepolia address
+
+
 # ── AgentMemory: persisted per-(user, agent) state ──
 
 class AgentMemory(TypedDict):
