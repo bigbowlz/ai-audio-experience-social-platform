@@ -77,3 +77,10 @@ async def test_stream_validates_each_segment(monkeypatch):
     with pytest.raises(ValueError, match="too short"):
         async for _ in stream_episode_script(selected, _brief()):
             pass
+
+
+@pytest.mark.asyncio
+async def test_generate_segment_raises_when_disable_llm_set(monkeypatch):
+    monkeypatch.setenv("DISABLE_LLM", "1")
+    with pytest.raises(RuntimeError, match="DISABLE_LLM"):
+        await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
