@@ -109,3 +109,57 @@ def _mock_client(response_data: dict[str, Any]) -> MagicMock:
     client = MagicMock()
     client.messages.create.return_value = msg
     return client
+
+
+# ── Group A: payload shape ────────────────────────────────────────────
+
+
+class TestFormatInputPayload:
+    def test_passes_all_pitch_fields(self):
+        """Every selected segment dict carries all 11 Pitch-derived fields."""
+        pitch = _full_pitch()
+        result = json.loads(_format_input([pitch], _TODAY))
+        assert len(result["selected_segments"]) == 1
+        seg = result["selected_segments"][0]
+        expected_keys = {
+            "agent", "title", "hook", "rationale", "source_refs",
+            "data", "priority", "claim_kind", "provenance_shape",
+            "thin_signal", "suggested_length_sec",
+        }
+        assert set(seg.keys()) == expected_keys
+
+    def test_top_level_keys_exact(self):
+        """Top-level payload has exactly selected_segments, today_context, target_total_secs."""
+        result = json.loads(_format_input([_full_pitch()], _TODAY))
+        assert set(result.keys()) == {"selected_segments", "today_context", "target_total_secs"}
+        # Explicitly assert producer_memory is NOT a key (per spec D1).
+        assert "producer_memory" not in result
+
+    def test_defaults_missing_optional_fields(self):
+        """Minimal Pitch (only required fields) gets safe defaults for optionals."""
+        pitch = _minimal_pitch()
+        result = json.loads(_format_input([pitch], _TODAY))
+        seg = result["selected_segments"][0]
+        assert seg["rationale"] == ""
+        assert seg["source_refs"] == []
+        assert seg["data"] == {}
+        assert seg["claim_kind"] == "neutral"
+        assert seg["provenance_shape"] == "balanced"
+        assert seg["thin_signal"] is False
+
+    def test_preserves_data_verbatim(self):
+        """Weather Pitch with full data round-trips byte-identical (no projection at v0)."""
+        weather_data = {
+            "current": {"temperature_f": 55, "condition": "rain"},
+            "day_ahead": {"high_f": 60, "low_f": 50, "hours_remaining": 12},
+            "hourly_forecast": [
+                {"hour": h, "temperature_f": 50 + h, "precipitation_probability": 70}
+                for h in range(24)
+            ],
+            "notable_facts": [{"category": "precipitation", "summary": "rain", "severity": "notable"}],
+            "air_quality": {"aqi": 35, "category": "fair"},
+            "location_name": "San Francisco",
+        }
+        pitch = _full_pitch(agent="weather", title="Weather in SF", data=weather_data)
+        result = json.loads(_format_input([pitch], _TODAY))
+        assert result["selected_segments"][0]["data"] == weather_data
