@@ -38,7 +38,7 @@ class EpisodeScript(TypedDict):
 
 MODEL = os.environ.get("PRODUCER_LLM_MODEL", "claude-sonnet-4-20250514")
 MAX_TOKENS = 8192
-TARGET_EPISODE_SECS = 360
+TARGET_EPISODE_SECS = 450
 
 # ── System prompt ────────────────────────────────────────────────────
 
@@ -101,17 +101,27 @@ def _format_input(
     selected: list[Pitch],
     today_context: TodayContext,
 ) -> str:
+    """Build the user-message JSON payload for Step 2.
+
+    Carries every Pitch field per segment with safe defaults for optionals.
+    No producer_memory: ProducerMemory is applied as a pure function
+    upstream (see feedback_producer_memory_deterministic.md and
+    docs/specs/2026-04-17-producer-step2-prompt.md §D1).
+    """
     segments = []
     for p in selected:
         segments.append({
             "agent": p["agent"],
             "title": p["title"],
             "hook": p["hook"],
-            "suggested_length_sec": p["suggested_length_sec"],
+            "rationale": p.get("rationale", ""),
+            "source_refs": p.get("source_refs", []),
+            "data": p.get("data", {}),
             "priority": p["priority"],
             "claim_kind": p.get("claim_kind", "neutral"),
             "provenance_shape": p.get("provenance_shape", "balanced"),
             "thin_signal": p.get("thin_signal", False),
+            "suggested_length_sec": p["suggested_length_sec"],
         })
 
     payload = {
