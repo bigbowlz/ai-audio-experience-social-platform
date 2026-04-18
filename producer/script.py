@@ -18,6 +18,7 @@ import anthropic
 
 from agents.protocol import Brief, Pitch, TodayContext
 from producer import DEFAULT_LLM_MODEL
+from producer.segments import TARGET_EPISODE_SECS
 
 # ── Output types ─────────────────────────────────────────────────────
 
@@ -40,7 +41,6 @@ class EpisodeScript(TypedDict):
 
 MODEL = os.environ.get("PRODUCER_LLM_MODEL", DEFAULT_LLM_MODEL)
 MAX_TOKENS = 8192
-TARGET_EPISODE_SECS = 450
 _MIN_SCRIPT_CHARS = (
     20  # floor: handles "Mostly cloudy, 14C." minimum; shorter = parse artifact
 )
