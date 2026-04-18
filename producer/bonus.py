@@ -24,6 +24,7 @@ import anthropic
 
 from agents.protocol import Pitch, TodayContext
 from producer import DEFAULT_LLM_MODEL
+from producer.events import emit
 from producer.segments import (
     DEFAULT_SEGMENT_SEC,
     MAX_SEGMENT_SEC,
@@ -325,3 +326,57 @@ def select_bonus_segments_llm(
             budget -= cost
 
     return bonus_selected, llm_result["guaranteed_pick_reasons"]
+
+
+def select_bonus_with_events(
+    guaranteed_slots: list[Pitch],
+    remaining_pitches: list[Pitch],
+    budget_remaining_sec: int,
+    today_context: TodayContext,
+    segue_overhead_sec: int = SEGUE_OVERHEAD_SECS,
+    length_overrides: dict[str, int] | None = None,
+) -> tuple[list[Pitch], list[PickReason]]:
+    """Same as select_bonus_segments_llm but emits Step 1.5 SSE events.
+
+    Spec: agents/docs/prompt_design.md §4 Step 1.5 SSE integration
+          producer/docs/DESIGN.md §SSE
+    """
+    bonus, guaranteed_reasons = select_bonus_segments_llm(
+        guaranteed_slots=guaranteed_slots,
+        remaining_pitches=remaining_pitches,
+        budget_remaining_sec=budget_remaining_sec,
+        today_context=today_context,
+        segue_overhead_sec=segue_overhead_sec,
+        length_overrides=length_overrides,
+    )
+
+    overall = (
+        guaranteed_reasons[0]["reasoning_summary"][:80]
+        if guaranteed_reasons else "selecting segments by priority within time budget"
+    )
+    emit("producer.selecting.started", {"reasoning_summary": overall})
+
+    for slot, reason in zip(guaranteed_slots, guaranteed_reasons):
+        emit("producer.pick", {
+            "agent": slot["agent"],
+            "pitch_title": slot["title"],
+            "allocated_sec": slot["suggested_length_sec"],
+            "reasoning_summary": reason["reasoning_summary"],
+            "kind": "guaranteed",
+        })
+    for b in bonus:
+        emit("producer.pick", {
+            "agent": b["agent"],
+            "pitch_title": b["title"],
+            "allocated_sec": b["suggested_length_sec"],
+            "reasoning_summary": b.get("reasoning_summary", ""),
+            "kind": "bonus",
+        })
+
+    total_sec = sum(p["suggested_length_sec"] for p in guaranteed_slots + bonus)
+    emit("producer.selecting.done", {
+        "running_order_titles": [p["title"] for p in guaranteed_slots + bonus],
+        "reasoning_summary": f"{len(guaranteed_slots) + len(bonus)} segments, {total_sec}s allocated",
+    })
+
+    return bonus, guaranteed_reasons

@@ -176,10 +176,10 @@ if __name__ == "__main__":
     print()
 
     # ── Step 1.5: LLM bonus selection ───────────────────────────────
-    from producer.bonus import select_bonus_segments_llm
+    from producer.bonus import select_bonus_with_events
     from producer.segments import append_bonus
 
-    bonus, guaranteed_reasons = select_bonus_segments_llm(
+    bonus, guaranteed_reasons = select_bonus_with_events(
         guaranteed_slots=order["segments"],
         remaining_pitches=remaining,
         budget_remaining_sec=bonus_budget,
