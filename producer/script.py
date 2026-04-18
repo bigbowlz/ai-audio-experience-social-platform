@@ -268,6 +268,13 @@ def generate_episode_script(
             f"LLM dropped {len(missing)} segment(s) from agents: {agents}"
         )
 
+    # First segment must have empty segue_in — cold open includes the transition.
+    if segments and segments[0]["segue_in"].strip():
+        raise ValueError(
+            f"First segment must have empty segue_in (cold open includes the "
+            f"transition). Got: {segments[0]['segue_in']!r}"
+        )
+
     return EpisodeScript(
         cold_open=data["cold_open"],
         segments=segments,

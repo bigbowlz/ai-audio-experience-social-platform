@@ -207,3 +207,22 @@ class TestSystemPrompt:
         assert "phrasing ceiling" in SYSTEM_PROMPT
         assert "read-only context" in SYSTEM_PROMPT
         assert "content source" in SYSTEM_PROMPT
+
+
+# ── Group C: validation assertions ────────────────────────────────────
+
+
+class TestValidation:
+    def test_first_segment_nonempty_segue_in_raises(self):
+        """First segment with non-empty segue_in raises ValueError."""
+        pitches = [_full_pitch(agent="weather", title="Weather in SF")]
+        bad_response = _episode_response([
+            _segment_response(
+                agent="weather",
+                title="Weather in SF",
+                segue_in="And now, the weather...",  # should be empty for first segment
+            ),
+        ])
+        with patch("producer.script.anthropic.Anthropic", return_value=_mock_client(bad_response)):
+            with pytest.raises(ValueError, match=r"segue_in"):
+                generate_episode_script(pitches, _BRIEF)
