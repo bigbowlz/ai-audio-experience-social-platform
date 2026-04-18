@@ -1,18 +1,16 @@
-"""Episode orchestrator: sync barrier + Brief assembly + pitch dispatch.
+"""Episode orchestrator: two-round pitch flow + Brief assembly + dispatch.
 
-Flow (per agents/docs/prompt_design.md §3):
+Flow (per producer/docs/DESIGN.md + docs/specs/2026-04-17-producer-alignment-plan.md):
 
-  Phase 1 — fetch_context (parallel)
-      weather_agent.fetch() ──► ScopeContext ──┐
-      calendar_agent.fetch() ──► ScopeContext ──┤──► orchestrator assembles Brief
-      youtube_agent.fetch() ──► ScopeContext    │
-      (alices_agent stub) ──► ScopeContext    │
-            ║                                   │
-            ║  SYNC BARRIER: wait for ALL       │
-            ╚═══════════════════════════════════╝
+  Round 1 — internal pitch round
+      weather/calendar/youtube: fetch_context (parallel) → assemble Brief → pitch (parallel)
 
-  Phase 2 — pitch (parallel, all receive same Brief)
-      each agent.pitch(brief, memory, context, user_id) ──► list[Pitch]
+  Producer decision + marketplace + agentic payment (CLI-level orchestration)
+
+  Round 2 — external pitch round (optional)
+      external agents (e.g. AlicesAgent): fetch_context → pitch, reusing Brief
+
+  agent.pitching.* events carry {"phase": "internal"|"external"}.
 
 Usage (CLI):
     python -m agents.orchestrator
@@ -47,64 +45,91 @@ def _time_of_day(hour: int) -> str:
 # ── Orchestrator ──────────────────────────────────────────────────────
 
 def run_episode(
+    internal_agents: list[DataAgent],
+    external_agents: list[DataAgent] | None = None,
+    user_id: str = "dev",
+) -> tuple[dict[str, list[Pitch]], Brief]:
+    """Run one episode generation pass — internal then external pitch round.
+
+    The internal round runs first; Producer (in CLI/coordinator) decides
+    to invoke external before the external round fires. This function
+    runs both rounds and returns the merged pitch dict.
+
+    Emits agent.pitching.* events with phase: "internal"|"external".
+
+    Spec: docs/specs/2026-04-17-producer-alignment-plan.md Phase 2
+          agents/docs/DESIGN.md §Reviewer Concern #2 (phase field)
+    """
+    from producer.events import emit
+
+    external_agents = external_agents or []
+
+    # ── Internal round ────────────────────────────────────────────────
+    emit("agent.pitching.started", {"phase": "internal"})
+    pitches_by_agent, brief = _run_pitch_round(
+        internal_agents, user_id, phase="internal"
+    )
+    emit("agent.pitching.done", {"phase": "internal"})
+
+    # ── External round (if any) ───────────────────────────────────────
+    if external_agents:
+        emit("agent.pitching.started", {"phase": "external"})
+        external_pitches, _ = _run_pitch_round(
+            external_agents, user_id, phase="external", brief=brief,
+        )
+        emit("agent.pitching.done", {"phase": "external"})
+        pitches_by_agent.update(external_pitches)
+
+    return pitches_by_agent, brief
+
+
+def _run_pitch_round(
     agents: list[DataAgent],
     user_id: str,
+    phase: str,
+    brief: Brief | None = None,
 ) -> tuple[dict[str, list[Pitch]], Brief]:
-    """Run one episode generation pass.
+    """One round of fetch_context (parallel) → assemble Brief → pitch (parallel).
 
-    Returns (pitches_by_agent, brief) — the Brief assembled from Phase 1
-    is returned so callers can pass it to select_segments() and then to
-    the Producer's LLM pass without reconstructing it.
+    If `brief` is provided (external round), skip Brief assembly and reuse it.
     """
-    # ── Phase 1: parallel fetch_context + load_memory ────────────────
-    # Both calls are parallel per agent; we wait for ALL before moving on.
+    _ = phase  # phase is emitted by the caller; helper keeps it for symmetry.
+
     with concurrent.futures.ThreadPoolExecutor() as pool:
         ctx_futures = {a.name: pool.submit(a.fetch_context, user_id) for a in agents}
         mem_futures = {a.name: pool.submit(a.load_memory, user_id) for a in agents}
-
-        # .result() blocks; exceptions propagate here so the caller sees them.
         contexts: dict[str, ScopeContext] = {
-            name: f.result() for name, f in ctx_futures.items()
+            n: f.result() for n, f in ctx_futures.items()
         }
         memories: dict[str, AgentMemory] = {
-            name: f.result() for name, f in mem_futures.items()
+            n: f.result() for n, f in mem_futures.items()
         }
 
-    # ── SYNC BARRIER: all fetch_context() done ────────────────────────
-    # Assemble Brief.today_context from weather + calendar ScopeContext fields.
-    # Use local time so date/day/time_of_day reflect the user's wall clock.
-    now = datetime.now()
+    if brief is None:
+        # Internal round: assemble Brief from weather + calendar contexts.
+        now = datetime.now()
+        weather_summary: str | None = None
+        calendar_events: list[str] | None = None
+        for a in agents:
+            ctx = contexts[a.name]
+            if a.name == "weather":
+                weather_summary = ctx.get("weather_summary")  # type: ignore[call-overload]
+            elif a.name == "calendar":
+                calendar_events = ctx.get("calendar_events")  # type: ignore[call-overload]
+        today_context: TodayContext = {
+            "date": now.date().isoformat(),
+            "day_of_week": now.strftime("%A"),
+            "time_of_day": _time_of_day(now.hour),
+            "weather_summary": weather_summary,
+            "calendar_events": calendar_events,
+        }
+        brief = {"today_context": today_context}
 
-    weather_summary: str | None = None
-    calendar_events: list[str] | None = None
-
-    for a in agents:
-        ctx = contexts[a.name]
-        if a.name == "weather":
-            weather_summary = ctx.get("weather_summary")  # type: ignore[call-overload]
-        elif a.name == "calendar":
-            calendar_events = ctx.get("calendar_events")  # type: ignore[call-overload]
-
-    today_context: TodayContext = {
-        "date": now.date().isoformat(),
-        "day_of_week": now.strftime("%A"),
-        "time_of_day": _time_of_day(now.hour),
-        "weather_summary": weather_summary,
-        "calendar_events": calendar_events,
-    }
-    brief: Brief = {"today_context": today_context}
-
-    # ── Phase 2: parallel pitch (all agents, same Brief) ─────────────
     agent_map = {a.name: a for a in agents}
-
     with concurrent.futures.ThreadPoolExecutor() as pool:
         pitch_futures = {
             name: pool.submit(
-                agent_map[name].pitch,
-                brief,
-                memories[name],
-                contexts[name],
-                user_id,
+                agent_map[name].pitch, brief, memories[name], contexts[name], user_id
             )
             for name in contexts
         }
@@ -117,57 +142,128 @@ def run_episode(
 
 # ── CLI ───────────────────────────────────────────────────────────────
 
-def _build_default_agents() -> list[DataAgent]:
-    from agents.calendar.agent import CalendarAgent
-    from agents.weather.agent import WeatherAgent
-    from agents.youtube.agent import YouTubeAgent
-
-    return [WeatherAgent(), CalendarAgent(), YouTubeAgent()]
-
-
 if __name__ == "__main__":
     import argparse
+
+    from payment.stub import initiate_tx
+    from producer.events import JsonlSink, emit, subscribe
+    from producer.external import (
+        decide_external_invocation,
+        query_marketplace,
+        select_external,
+    )
+
+    # Print every SSE-bound event as JSONL to stdout so `producer.external_decision.started`,
+    # `producer.marketplace.queried`, `producer.external_agent.selected`, `payment.*`,
+    # `producer.memory.applied`, `producer.selecting.*`, and `agent.pitching.*` all show up
+    # in the CLI smoke test. The api-storage component will replace this sink with an HTTP/SSE one.
+    subscribe(JsonlSink())
 
     parser = argparse.ArgumentParser(
         description="Run one episode generation pass and print EpisodeScript JSON."
     )
-    parser.add_argument("--user-id", default="dev", help="User ID for seeding / memory lookup")
-    parser.add_argument("--no-llm", action="store_true", help="Skip LLM passes (template hooks + no script)")
+    parser.add_argument("--user-id", default="dev")
+    parser.add_argument("--no-llm", action="store_true")
+    parser.add_argument(
+        "--no-external",
+        action="store_true",
+        help="Skip external pitch round (Phase 2 escape hatch)",
+    )
     args = parser.parse_args()
 
-    print(f"[orchestrator] Running episode for user_id={args.user_id!r} …\n")
-
-    # ── Phase 1+2: fetch + pitch ────────────────────────────────────
     if args.no_llm:
         os.environ["DISABLE_LLM"] = "1"
 
-    agents = _build_default_agents()
-    pitches_by_agent, brief = run_episode(agents, user_id=args.user_id)
+    print(f"[orchestrator] Running episode for user_id={args.user_id!r} …\n")
 
+    # ── Internal pitch round ─────────────────────────────────────────
+    from agents.calendar.agent import CalendarAgent
+    from agents.weather.agent import WeatherAgent
+    from agents.youtube.agent import YouTubeAgent
+
+    internal_agents = [WeatherAgent(), CalendarAgent(), YouTubeAgent()]
+
+    pitches_by_agent, brief = run_episode(internal_agents, user_id=args.user_id)
+
+    # ── Producer external decision → marketplace → payment → external pitch ──
+    if not args.no_external:
+        decision = decide_external_invocation(pitches_by_agent)
+        emit("producer.external_decision.started", {
+            "reason": "anti_cocoon_policy_v0",
+            "reasoning_summary": decision["rationale"],
+        })
+        if decision["decision"] == "invoke":
+            candidates = query_marketplace()
+            emit("producer.marketplace.queried", {
+                "candidates": [
+                    {"handle": c["handle"], "display_name": c["display_name"],
+                     "price_usdc": c["price_usdc"]}
+                    for c in candidates
+                ],
+                "reasoning_summary": f"{len(candidates)} candidates available",
+            })
+            chosen = select_external(candidates, brief=brief)
+            emit("producer.external_agent.selected", {
+                "agent": chosen["handle"],
+                "display_name": chosen["display_name"],
+                "rationale": "expands topic diversity for this brief",
+                "reasoning_summary": f"picked {chosen['handle']}",
+            })
+
+            # ── Agentic payment (mocked) ────────────────────────────
+            tx = initiate_tx(
+                from_wallet="0xPRODUCER",
+                to_wallet=chosen["wallet_address"],
+                amount_usdc=chosen["price_usdc"],
+            )
+            emit("payment.initiated", {
+                "to": chosen["wallet_address"],
+                "amount_usdc": chosen["price_usdc"],
+                "mode_badge": tx["mode"],
+            })
+            emit("payment.confirmed", {
+                "tx_hash": tx["tx_hash"],
+                "basescan_url": tx["basescan_url"],
+                "mode_badge": tx["mode"],
+            })
+
+            # ── External pitch round ────────────────────────────────
+            from agents.alices.agent import AlicesAgent
+
+            external_pitches, _ = run_episode(
+                internal_agents=[],
+                external_agents=[AlicesAgent()],
+                user_id=args.user_id,
+            )
+            pitches_by_agent.update(external_pitches)
+
+    # ── Display per-agent pitches ────────────────────────────────────
     for agent_name, pitches in pitches_by_agent.items():
         print(f"── {agent_name} ({len(pitches)} pitch{'es' if len(pitches) != 1 else ''}) ──")
         for p in pitches:
             print(f"  [{p['priority']:.4f}] {p['title']}")
             print(f"          claim_kind={p['claim_kind']}  provenance={p['provenance_shape']}")
-            print(f"          hook: {p['hook'][:90]}…" if len(p['hook']) > 90 else f"          hook: {p['hook']}")
+            hook_display = (
+                f"          hook: {p['hook'][:90]}…"
+                if len(p['hook']) > 90
+                else f"          hook: {p['hook']}"
+            )
+            print(hook_display)
         print()
 
-    # ── Step 0.5: apply ProducerMemory deterministically ────────────
-    # Memory is NEVER passed to an LLM prompt; it's applied here as a
-    # pure transform on `priority`. See producer/docs/DESIGN.md.
+    # ── Step 0.5 + 1 + 1.5 + 2 (memory → guaranteed → bonus → script) ─
+    from producer.bonus import select_bonus_with_events
     from producer.memory import (
         apply_producer_memory,
         emit_memory_applied,
         load_producer_memory,
     )
+    from producer.segments import append_bonus, select_guaranteed_slots
 
     producer_memory = load_producer_memory(args.user_id)
     raw_pitches_by_agent = pitches_by_agent
     pitches_by_agent = apply_producer_memory(pitches_by_agent, producer_memory)
     emit_memory_applied(producer_memory, raw_pitches_by_agent, pitches_by_agent)
-
-    # ── Step 1: deterministic Phase 1 — guaranteed slots ────────────
-    from producer.segments import select_guaranteed_slots
 
     order, remaining, bonus_budget = select_guaranteed_slots(pitches_by_agent)
     print(f"── Guaranteed slots ({order['guaranteed_count']}; {bonus_budget}s bonus budget) ──")
@@ -175,11 +271,7 @@ if __name__ == "__main__":
         print(f"  [{p['agent']}] {p['title']} ({p['suggested_length_sec']}s)")
     print()
 
-    # ── Step 1.5: LLM bonus selection ───────────────────────────────
-    from producer.bonus import select_bonus_with_events
-    from producer.segments import append_bonus
-
-    bonus, guaranteed_reasons = select_bonus_with_events(
+    bonus, _guaranteed_reasons = select_bonus_with_events(
         guaranteed_slots=order["segments"],
         remaining_pitches=remaining,
         budget_remaining_sec=bonus_budget,
@@ -195,7 +287,6 @@ if __name__ == "__main__":
         )
     print()
 
-    # ── Step 2: Producer LLM script pass ────────────────────────────
     if args.no_llm:
         print("[orchestrator] --no-llm: skipping Producer script generation.")
         print(json.dumps(selected, indent=2))
