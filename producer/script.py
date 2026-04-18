@@ -209,6 +209,8 @@ async def generate_segment(
     Enforces first-segue-empty and script-length-floor internally.
     No events emitted here — stream_episode_script handles SSE.
     """
+    if os.environ.get("DISABLE_LLM"):
+        raise RuntimeError("LLM disabled via DISABLE_LLM env var")
     payload = {
         "segment": {
             "agent": segment["agent"],
@@ -320,6 +322,8 @@ async def generate_cold_open(
 
     Tight prompt; <400 token output.
     """
+    if os.environ.get("DISABLE_LLM"):
+        raise RuntimeError("LLM disabled via DISABLE_LLM env var")
     payload = {
         "task": "cold_open",
         "first_segment": {
@@ -342,6 +346,8 @@ async def generate_cold_open(
 
 async def generate_sign_off(brief: Brief) -> str:
     """LLM call: ~10s spoken sign-off."""
+    if os.environ.get("DISABLE_LLM"):
+        raise RuntimeError("LLM disabled via DISABLE_LLM env var")
     payload = {
         "task": "sign_off",
         "today_context": dict(brief["today_context"]),
@@ -365,6 +371,8 @@ def generate_episode_script(
     """Sync back-compat collector. Runs stream_episode_script and collects results,
     plus the separate cold_open and sign_off LLM calls.
     """
+    if os.environ.get("DISABLE_LLM"):
+        raise RuntimeError("LLM disabled via DISABLE_LLM env var")
     async def _collect() -> EpisodeScript:
         cold_open = await generate_cold_open(selected, brief)
         segments: list[SegmentScript] = [
