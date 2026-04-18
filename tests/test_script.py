@@ -163,3 +163,47 @@ class TestFormatInputPayload:
         pitch = _full_pitch(agent="weather", title="Weather in SF", data=weather_data)
         result = json.loads(_format_input([pitch], _TODAY))
         assert result["selected_segments"][0]["data"] == weather_data
+
+
+# ── Group B: system prompt structural assertions ──────────────────────
+
+
+class TestSystemPrompt:
+    def test_has_claim_kind_directive_block(self):
+        """All 4 claim_kind values + Permitted/Prohibited words appear."""
+        for kind in ("durable", "rising", "discovery", "neutral"):
+            assert kind in SYSTEM_PROMPT, f"missing claim_kind: {kind!r}"
+        assert "Permitted" in SYSTEM_PROMPT
+        assert "Prohibited" in SYSTEM_PROMPT
+
+    def test_has_field_legend(self):
+        """Every Pitch field name appears in the legend."""
+        for field in (
+            "hook", "rationale", "source_refs", "data",
+            "claim_kind", "provenance_shape", "thin_signal",
+            "priority", "suggested_length_sec",
+        ):
+            assert field in SYSTEM_PROMPT, f"missing field in legend: {field!r}"
+
+    def test_has_per_agent_data_crib(self):
+        """Each agent appears in a data-crib context."""
+        for agent in ("weather", "calendar", "youtube", "alices"):
+            assert agent in SYSTEM_PROMPT, f"missing agent in crib: {agent!r}"
+        # Specific data-field references the crib must call out:
+        assert "data.current" in SYSTEM_PROMPT
+        assert "data.events" in SYSTEM_PROMPT
+        assert "notable_facts" in SYSTEM_PROMPT
+
+    def test_has_thin_signal_handling(self):
+        """thin_signal handling block names per-agent nudge phrasings."""
+        assert "thin_signal" in SYSTEM_PROMPT
+        # YouTube/Alices nudge:
+        assert "more personal as your YouTube activity grows" in SYSTEM_PROMPT
+        # Weather nudge:
+        assert "Local forecast wasn't available today" in SYSTEM_PROMPT
+
+    def test_has_hook_data_layering_rule(self):
+        """Hook vs data layering rule key phrases present."""
+        assert "phrasing ceiling" in SYSTEM_PROMPT
+        assert "read-only context" in SYSTEM_PROMPT
+        assert "content source" in SYSTEM_PROMPT
