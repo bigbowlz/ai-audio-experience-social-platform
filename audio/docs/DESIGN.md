@@ -23,6 +23,8 @@ Everything that turns a Script into listenable audio on the user's device:
 5. **No voice cloning for v0.** Alice gets a stock ElevenLabs voice. Narrator gets a stock voice. Both from ElevenLabs library.
 6. **ffmpeg offline concat is NOT on the live-gen path.** Live path serves per-segment MP3s. ffmpeg assembles single-file handoff MP3 post-rehearsal only.
 7. **Producer `write_script()` returns `list[SegmentScript]`, not an async iterator.** All segments are available at once, enabling parallel batch dispatch.
+
+   **Resolved 2026-04-17 (decision 2a):** Producer now exposes `stream_episode_script(...) -> AsyncIterator[SegmentScript]` and audio's `generate_episode_audio` consumes the iterator directly. Segment 0 remains critical-path; 1-N fan out as the iterator yields, enabling producer↔audio parallelism. See `docs/specs/2026-04-17-producer-alignment-plan.md` Phase 3.
 8. **Budget:** $20 ElevenLabs pay-as-you-go (~320-400K chars, ~60-80 full episodes). Warn at 80% of verified budget.
 9. **Localhost-only (P4).** No CDN, no hosted audio. Per-segment MP3s served from local disk.
 
@@ -78,13 +80,13 @@ All segments use the ElevenLabs batch API. Segment 1 fires first, segments 2-N f
 - If v1 needs faster first-audio, streaming can be added as an optimization on the batch path with no architectural change (the SDK supports both).
 
 ```
-Producer.write_script() returns list[SegmentScript]
+Producer.stream_episode_script() yields AsyncIterator[SegmentScript]
          │
          ├─── Segment 1 ──► Batch TTS ──► disk write
          │                                  ├─► SSE: audio.segment.done
          │                                  └─► Player starts playback
          │
-         └─── Segments 2-N (parallel) ──► Batch TTS ──► disk write
+         └─── Segments 2-N (dispatch as iterator yields) ──► Batch TTS ──► disk write
                                               └─► SSE: audio.segment.done (per segment)
 ```
 
@@ -244,33 +246,30 @@ The orchestrator looks up `VOICE_MAP[segment.agent]` and passes the voice_id to 
 
 ### Parallel dispatch
 
-Producer returns `list[SegmentScript]`. The orchestrator fires segment 1 first, then segments 2-N in parallel:
+Producer yields `AsyncIterator[SegmentScript]`. The orchestrator fires segment 1 first, then dispatches segments 2-N as async tasks as the iterator yields:
 
 ```python
 # Caller pattern (in the orchestrator, not in TTSClient):
-segments: list[SegmentScript] = producer.write_script(...)
+segments: AsyncIterator[SegmentScript] = producer.stream_episode_script(...)
 
 # Segment 1 first (critical path — user is waiting)
-seg1 = segments[0]
-seg1_result = await tts.synthesize(
-    seg1.script, VOICE_MAP[seg1.agent], episode_id, 0
+seg_iter = segments.__aiter__()
+seg_0 = await seg_iter.__anext__()
+seg0_result = await tts.synthesize(
+    seg_0["script"], VOICE_MAP[seg_0["agent"]], episode_id, 0
 )
-emit_sse("audio.segment.done", seg1_result)
+emit_sse("audio.segment.done", seg0_result)
 
-# Fire remaining segments in parallel
-background_tasks = [
-    tts.synthesize(seg.script, VOICE_MAP[seg.agent], episode_id, seg.index)
-    for seg in segments[1:]
-]
-for coro in asyncio.as_completed(background_tasks):
+# Dispatch remaining segments as tasks as the iterator yields
+tasks = []
+index = 1
+async for seg in seg_iter:
+    tasks.append(asyncio.create_task(tts.synthesize(..., index)))
+    index += 1
+
+for coro in asyncio.as_completed(tasks):
     result = await coro
     emit_sse("audio.segment.done", result)
-
-# After all complete (or fail):
-emit_sse("episode.done", {
-    "total_segments": len(segments),
-    "skipped_segments": [i for i in range(len(segments)) if i not in completed],
-})
 ```
 
 ### `MusicFiller` (browser-side, TypeScript)
