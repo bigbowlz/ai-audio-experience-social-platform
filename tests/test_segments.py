@@ -1,33 +1,34 @@
-"""Tests for producer/segments.py.
+"""Tests for producer/segments.py — select_guaranteed_slots().
 
-Coverage per prompt_design.md §Test mandate:
-- Phase 1 guaranteed slots
-- Phase 2 bonus by priority
-- Budget exhaustion
-- Thin-signal pitch handling
+Coverage per prompt_design.md §Test mandate (Step 1):
+- Phase 1 guaranteed slots (one per agent, highest priority wins)
+- Thin-signal pitch handling (still gets its guaranteed slot)
 - MAX_SEGMENT_SEC clamping
-- Cold-open-has-no-segue arithmetic
+- DEFAULT_SEGMENT_SEC applied when no overrides
+- length_overrides respected when provided
+- Remaining pitches carry suggested_length_sec
+- Budget math (open/close, segment lengths, N-1 segues)
+
+Bonus/priority-sort coverage lives in tests/test_bonus_selection.py (fallback path).
 """
 
 from __future__ import annotations
 
-import pytest
-
 from agents.protocol import Pitch
 from producer.segments import (
-    select_segments,
     DEFAULT_SEGMENT_SEC,
-    TARGET_EPISODE_SECS,
-    SEGUE_OVERHEAD_SECS,
-    OPEN_CLOSE_SECS,
     MAX_SEGMENT_SEC,
+    OPEN_CLOSE_SECS,
+    SEGUE_OVERHEAD_SECS,
+    TARGET_EPISODE_SECS,
+    select_guaranteed_slots,
 )
 
 
-def _pitch(agent: str, priority: float, thin_signal: bool = False) -> Pitch:
+def _pitch(agent: str, priority: float, thin_signal: bool = False, title: str | None = None) -> Pitch:
     return Pitch(
         agent=agent,
-        title=f"{agent} pitch",
+        title=title or f"{agent} pitch p{priority}",
         hook="hook",
         rationale="test",
         source_refs=[],
@@ -46,65 +47,45 @@ class TestPhase1GuaranteedSlots:
             "calendar": [_pitch("calendar", 0.4)],
             "alices": [_pitch("alices", 0.7)],
         }
-        result = select_segments(pitches)
-        agents_in_result = [p["agent"] for p in result]
-        assert "youtube" in agents_in_result
-        assert "weather" in agents_in_result
-        assert "calendar" in agents_in_result
-        assert "alices" in agents_in_result
+        guaranteed, _, _ = select_guaranteed_slots(pitches)
+        agents = [p["agent"] for p in guaranteed]
+        assert set(agents) == {"youtube", "weather", "calendar", "alices"}
+        assert len(guaranteed) == 4
 
     def test_highest_priority_selected(self):
         pitches = {
-            "youtube": [_pitch("youtube", 0.9), _pitch("youtube", 0.5), _pitch("youtube", 0.3)],
+            "youtube": [
+                _pitch("youtube", 0.9, title="top"),
+                _pitch("youtube", 0.5),
+                _pitch("youtube", 0.3),
+            ],
         }
-        result = select_segments(pitches)
-        assert result[0]["priority"] == 0.9
+        guaranteed, _, _ = select_guaranteed_slots(pitches)
+        assert guaranteed[0]["title"] == "top"
+        assert guaranteed[0]["priority"] == 0.9
 
-
-class TestPhase2BonusByPriority:
-    def test_bonus_slots_by_priority(self):
+    def test_remaining_carries_non_selected(self):
         pitches = {
-            "youtube": [_pitch("youtube", 0.9), _pitch("youtube", 0.8), _pitch("youtube", 0.1)],
-            "weather": [_pitch("weather", 0.3)],
+            "youtube": [
+                _pitch("youtube", 0.9, title="top"),
+                _pitch("youtube", 0.5, title="mid"),
+                _pitch("youtube", 0.3, title="low"),
+            ],
         }
-        result = select_segments(pitches)
-        # Guaranteed: youtube(0.9) + weather(0.3) = 2 segments
-        # Remaining: youtube(0.8) and youtube(0.1)
-        # If budget allows, 0.8 should be selected before 0.1
-        bonus = [p for p in result if p not in result[:2] or True]
-        priorities = [p["priority"] for p in result]
-        # 0.9 and 0.3 are guaranteed, 0.8 should come next if budget allows
-        assert 0.8 in priorities or len(result) == 2  # budget might not allow
+        _, remaining, _ = select_guaranteed_slots(pitches)
+        titles = {p["title"] for p in remaining}
+        assert titles == {"mid", "low"}
 
-
-class TestBudgetExhaustion:
-    def test_budget_limits_segments(self):
-        # Override all agents to 90s to exhaust budget quickly
-        overrides = {"a": 90, "b": 90, "c": 90, "d": 90}
+    def test_remaining_has_suggested_length_sec(self):
         pitches = {
-            "a": [_pitch("a", 0.9)],
-            "b": [_pitch("b", 0.8)],
-            "c": [_pitch("c", 0.7)],
-            "d": [_pitch("d", 0.6)],
+            "youtube": [
+                _pitch("youtube", 0.9),
+                _pitch("youtube", 0.5),
+            ],
         }
-        result = select_segments(pitches, length_overrides=overrides)
-        # Budget: 360 - 25 = 335
-        # 4 guaranteed at 90 each = 360, + 3 segues at 10 = 30 → total 390, exceeds 335
-        # But all 4 are guaranteed so they're selected regardless
-        # No bonus slots possible
-        assert len(result) == 4  # all guaranteed slots selected
-
-    def test_no_bonus_when_budget_negative(self):
-        overrides = {"a": 90, "b": 90, "c": 90, "d": 90}
-        pitches = {
-            "a": [_pitch("a", 0.9), _pitch("a", 0.5)],
-            "b": [_pitch("b", 0.8), _pitch("b", 0.4)],
-            "c": [_pitch("c", 0.7)],
-            "d": [_pitch("d", 0.6)],
-        }
-        result = select_segments(pitches, length_overrides=overrides)
-        # 4 guaranteed at 90 + 3 segues = 390 > 335 budget → no bonus slots
-        assert len(result) == 4
+        _, remaining, _ = select_guaranteed_slots(pitches)
+        assert len(remaining) == 1
+        assert remaining[0]["suggested_length_sec"] == DEFAULT_SEGMENT_SEC["youtube"]
 
 
 class TestThinSignalPitch:
@@ -113,82 +94,109 @@ class TestThinSignalPitch:
             "youtube": [_pitch("youtube", 0.3, thin_signal=True)],
             "weather": [_pitch("weather", 0.5)],
         }
-        result = select_segments(pitches)
-        agents = [p["agent"] for p in result]
-        assert "youtube" in agents
-        yt = next(p for p in result if p["agent"] == "youtube")
+        guaranteed, _, _ = select_guaranteed_slots(pitches)
+        yt = next(p for p in guaranteed if p["agent"] == "youtube")
         assert yt["thin_signal"] is True
 
-    def test_thin_signal_low_priority_no_bonus(self):
-        """Thin-signal pitch with low priority shouldn't win bonus slots."""
-        pitches = {
-            "youtube": [
-                _pitch("youtube", 0.3, thin_signal=True),
-                _pitch("youtube", 0.1, thin_signal=True),
-            ],
-            "weather": [_pitch("weather", 0.9), _pitch("weather", 0.85)],
-        }
-        result = select_segments(pitches)
-        # weather's bonus (0.85) should come before youtube's remainder (0.1)
-        bonus = result[2:]  # after 2 guaranteed
-        if bonus:
-            assert bonus[0]["agent"] == "weather" or bonus[0]["priority"] >= 0.85
 
-
-class TestMaxSegmentSecClamping:
-    def test_over_max_is_clamped(self):
-        pitches = {
-            "youtube": [_pitch("youtube", 0.9)],
-        }
-        # Override youtube to 200s — should be clamped to MAX_SEGMENT_SEC
-        result = select_segments(pitches, length_overrides={"youtube": 200})
-        assert result[0]["suggested_length_sec"] == MAX_SEGMENT_SEC
-
-    def test_under_max_unchanged(self):
-        pitches = {
-            "youtube": [_pitch("youtube", 0.9)],
-        }
-        # Override youtube to 60s — under MAX, should be unchanged
-        result = select_segments(pitches, length_overrides={"youtube": 60})
-        assert result[0]["suggested_length_sec"] == 60
-
+class TestSegmentLengths:
     def test_default_lengths_applied(self):
-        """Producer defaults are applied when no overrides given."""
         pitches = {
             "youtube": [_pitch("youtube", 0.9)],
             "weather": [_pitch("weather", 0.5)],
+            "calendar": [_pitch("calendar", 0.4)],
+            "alices": [_pitch("alices", 0.7)],
         }
-        result = select_segments(pitches)
-        yt = next(p for p in result if p["agent"] == "youtube")
-        wx = next(p for p in result if p["agent"] == "weather")
-        assert yt["suggested_length_sec"] == DEFAULT_SEGMENT_SEC["youtube"]
-        assert wx["suggested_length_sec"] == DEFAULT_SEGMENT_SEC["weather"]
+        guaranteed, _, _ = select_guaranteed_slots(pitches)
+        lengths = {p["agent"]: p["suggested_length_sec"] for p in guaranteed}
+        assert lengths == DEFAULT_SEGMENT_SEC
+
+    def test_overrides_respected(self):
+        pitches = {"youtube": [_pitch("youtube", 0.9)]}
+        guaranteed, _, _ = select_guaranteed_slots(pitches, length_overrides={"youtube": 60})
+        assert guaranteed[0]["suggested_length_sec"] == 60
+
+    def test_over_max_is_clamped(self):
+        pitches = {"youtube": [_pitch("youtube", 0.9)]}
+        guaranteed, _, _ = select_guaranteed_slots(pitches, length_overrides={"youtube": 200})
+        assert guaranteed[0]["suggested_length_sec"] == MAX_SEGMENT_SEC
 
 
-class TestColdOpenSegueArithmetic:
-    def test_segue_count_is_n_minus_1(self):
-        """N segments need N-1 segues (cold open transitions into segment 1)."""
-        overrides = {"a": 50, "b": 50}
+class TestBudgetMath:
+    def test_single_agent_no_segue(self):
+        """1 guaranteed segment → 0 segues. budget = 450 - 25 - 50 = 375."""
+        pitches = {"a": [_pitch("a", 0.9)]}
+        _, _, budget = select_guaranteed_slots(pitches, length_overrides={"a": 50})
+        assert budget == TARGET_EPISODE_SECS - OPEN_CLOSE_SECS - 50
+
+    def test_n_minus_1_segues(self):
+        """2 guaranteed segments → 1 segue."""
         pitches = {
             "a": [_pitch("a", 0.9)],
             "b": [_pitch("b", 0.8)],
         }
-        result = select_segments(pitches, length_overrides=overrides)
-        # Budget = 360 - 25 - (50 + 50) - (n-1)*10
-        # = 335 - 100 - 10 = 225 for bonus
-        expected_budget_after_guaranteed = (
-            TARGET_EPISODE_SECS - OPEN_CLOSE_SECS
-            - sum(p["suggested_length_sec"] for p in result[:2])
-            - SEGUE_OVERHEAD_SECS * (2 - 1)
+        _, _, budget = select_guaranteed_slots(
+            pitches, length_overrides={"a": 50, "b": 50}
         )
-        assert expected_budget_after_guaranteed == 225
+        # 450 - 25 - 50 - 50 - 1*10 = 315
+        assert budget == TARGET_EPISODE_SECS - OPEN_CLOSE_SECS - 100 - SEGUE_OVERHEAD_SECS
 
-    def test_single_agent_no_segue(self):
-        """1 segment → 0 segues."""
+    def test_budget_can_go_negative(self):
+        """Guaranteed slots consume budget even if it blows through zero."""
         pitches = {
             "a": [_pitch("a", 0.9)],
+            "b": [_pitch("b", 0.8)],
+            "c": [_pitch("c", 0.7)],
+            "d": [_pitch("d", 0.6)],
+            "e": [_pitch("e", 0.5)],
         }
-        result = select_segments(pitches, length_overrides={"a": 50})
-        # Budget = 360 - 25 - 50 - 0*10 = 285
-        expected_budget = TARGET_EPISODE_SECS - OPEN_CLOSE_SECS - 50 - 0
-        assert expected_budget == 285
+        # 5 segments at 90s each + 4 segues × 10s = 490, but 425 budget → -65
+        _, _, budget = select_guaranteed_slots(
+            pitches, length_overrides={k: 90 for k in "abcde"}
+        )
+        assert budget < 0
+
+
+class TestTieBreakDeterminism:
+    """Decision 5a: ties resolve by (-priority, agent, title) — reproducible."""
+
+    @staticmethod
+    def _p(agent: str, title: str, priority: float) -> Pitch:
+        # Local helper — file-level `_pitch` has a different signature
+        # (agent, priority, thin_signal, title). Keep this scoped so existing
+        # call sites remain untouched.
+        return Pitch(
+            agent=agent,
+            title=title,
+            hook="hook",
+            rationale="test",
+            source_refs=[],
+            priority=priority,
+            thin_signal=False,
+            claim_kind="neutral",
+            provenance_shape="balanced",
+        )
+
+    def test_same_priority_within_agent_resolves_by_title_asc(self):
+        # Two pitches at identical priority within one agent.
+        # DESIGN: deterministic by title ASC as final tiebreaker.
+        pitches = {
+            "youtube": [
+                self._p("youtube", "zebra", 0.9),
+                self._p("youtube", "alpha", 0.9),  # same priority, alpha < zebra
+            ],
+        }
+        guaranteed, _, _ = select_guaranteed_slots(pitches)
+        assert guaranteed[0]["title"] == "alpha"
+
+    def test_same_priority_across_agents_resolves_by_agent_asc(self):
+        # Two agents with their top pitch tied — agent name ASC wins.
+        pitches = {
+            "youtube": [self._p("youtube", "y", 0.7)],
+            "calendar": [self._p("calendar", "c", 0.7)],
+        }
+        guaranteed, _, _ = select_guaranteed_slots(pitches)
+        # Both win their guaranteed slots (one per agent), but iteration
+        # order in `guaranteed` should be deterministic by agent ASC.
+        agents = [p["agent"] for p in guaranteed]
+        assert agents == sorted(agents)  # ["calendar", "youtube"]
