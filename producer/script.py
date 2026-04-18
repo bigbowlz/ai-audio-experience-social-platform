@@ -3,6 +3,12 @@
 Two-step pipeline (prompt_design.md §4):
   Step 1 (deterministic): select_segments() in producer/segments.py
   Step 2 (this module):   LLM writes per-segment scripts via stream_episode_script()
+
+DISABLE_LLM semantics: this module raises RuntimeError on DISABLE_LLM=1 at every
+entry point — there is no deterministic script fallback. (producer/bonus.py falls
+back to a priority-sort when DISABLE_LLM=1; script generation has no equivalent
+offline path, so callers must gate upstream as agents/orchestrator.py does via
+args.no_llm.)
 """
 
 from __future__ import annotations
