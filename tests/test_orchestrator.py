@@ -6,9 +6,15 @@ Spec: audio/docs/DESIGN.md §Parallel dispatch, §Error Handling Matrix
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+
+async def _as_stream(items: list) -> AsyncIterator:
+    for item in items:
+        yield item
 
 from audio.orchestrator import generate_episode_audio, AudioResult
 from audio.tts import SegmentResult
@@ -59,7 +65,7 @@ class TestGenerateEpisodeAudio:
         ]
         result = await generate_episode_audio(
             tts=mock_tts,
-            segments=segments,
+            segments=_as_stream(segments),
             episode_id="ep1",
         )
         assert len(result.segment_results) == 3
@@ -86,7 +92,7 @@ class TestGenerateEpisodeAudio:
             _make_segment("youtube", "First", 0),
             _make_segment("weather", "Second", 1),
         ]
-        await generate_episode_audio(tts=mock_tts, segments=segments, episode_id="ep1")
+        await generate_episode_audio(tts=mock_tts, segments=_as_stream(segments), episode_id="ep1")
         # Segment 0 must be the first call
         assert call_order[0] == 0
 
@@ -107,7 +113,7 @@ class TestGenerateEpisodeAudio:
             _make_segment("calendar", "OK too", 2),
         ]
         result = await generate_episode_audio(
-            tts=mock_tts, segments=segments, episode_id="ep1",
+            tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
         )
         assert len(result.segment_results) == 2
         assert result.episode_done.skipped_segments == [1]
@@ -120,7 +126,7 @@ class TestGenerateEpisodeAudio:
 
         segments = [_make_segment("youtube", "Fail", 0)]
         result = await generate_episode_audio(
-            tts=mock_tts, segments=segments, episode_id="ep1",
+            tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
         )
         assert result.episode_failed is not None
         assert result.episode_done is None
@@ -133,7 +139,7 @@ class TestGenerateEpisodeAudio:
 
         segments = [_make_segment("alices", "Alice's take", 0)]
         await generate_episode_audio(
-            tts=mock_tts, segments=segments, episode_id="ep1",
+            tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
         )
         call_kwargs = mock_tts.synthesize.call_args
         # alices agent should use GUEST_VOICE_ID
@@ -152,7 +158,7 @@ class TestGenerateEpisodeAudio:
             _make_segment("weather", "B" * 100, 1),
         ]
         result = await generate_episode_audio(
-            tts=mock_tts, segments=segments, episode_id="ep1",
+            tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
         )
         assert result.total_billed_characters == 200
 
@@ -169,7 +175,7 @@ class TestGenerateEpisodeAudio:
         segments = [_make_segment("youtube", "Slow", 0)]
         with patch.object(_orch, "PIPELINE_TIMEOUT_SEC", 0.01):
             result = await generate_episode_audio(
-                tts=mock_tts, segments=segments, episode_id="ep1",
+                tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
             )
         assert result.episode_failed is not None
         assert result.episode_done is None
@@ -182,7 +188,7 @@ class TestGenerateEpisodeAudio:
 
         segments = [_make_segment("unknown_agent", "Hello", 0)]
         await generate_episode_audio(
-            tts=mock_tts, segments=segments, episode_id="ep1",
+            tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
         )
         call_kwargs = mock_tts.synthesize.call_args
         assert call_kwargs.kwargs["voice_id"] == NARRATOR_VOICE_ID
@@ -192,7 +198,7 @@ class TestGenerateEpisodeAudio:
         """Empty segments list produces episode_failed."""
         mock_tts = AsyncMock()
         result = await generate_episode_audio(
-            tts=mock_tts, segments=[], episode_id="ep1",
+            tts=mock_tts, segments=_as_stream([]), episode_id="ep1",
         )
         assert result.episode_failed is not None
         assert result.episode_done is None
@@ -221,7 +227,7 @@ class TestOnSegmentDoneCallback:
             _make_segment("calendar", "C", 2),
         ]
         await generate_episode_audio(
-            tts=mock_tts, segments=segments, episode_id="ep1",
+            tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
             on_segment_done=on_done,
         )
         assert len(callback_events) == 3
@@ -252,7 +258,7 @@ class TestOnSegmentDoneCallback:
             _make_segment("weather", "Second", 1),
         ]
         await generate_episode_audio(
-            tts=mock_tts, segments=segments, episode_id="ep1",
+            tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
             on_segment_done=on_done,
         )
         assert fired_at[0] == 0  # seg 0 callback fired first
@@ -279,7 +285,7 @@ class TestOnSegmentDoneCallback:
             _make_segment("calendar", "OK", 2),
         ]
         await generate_episode_audio(
-            tts=mock_tts, segments=segments, episode_id="ep1",
+            tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
             on_segment_done=on_done,
         )
         indices = [e.segment_index for e in callback_events]
@@ -294,7 +300,7 @@ class TestOnSegmentDoneCallback:
 
         segments = [_make_segment("youtube", "Test", 0)]
         result = await generate_episode_audio(
-            tts=mock_tts, segments=segments, episode_id="ep1",
+            tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
         )
         assert len(result.segment_results) == 1
 
@@ -317,7 +323,7 @@ class TestFailFast401:
             _make_segment("calendar", "C", 2),
         ]
         result = await generate_episode_audio(
-            tts=mock_tts, segments=segments, episode_id="ep1",
+            tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
         )
         assert result.episode_failed is not None
         assert "401" in result.episode_failed.reason
@@ -347,7 +353,7 @@ class TestFailFast401:
             _make_segment("weather", "Bad key", 1),
         ]
         result = await generate_episode_audio(
-            tts=mock_tts, segments=segments, episode_id="ep1",
+            tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
         )
         assert result.episode_failed is not None
         assert "401" in result.episode_failed.reason
@@ -372,7 +378,7 @@ class TestFailFast401:
             _make_segment("calendar", "OK", 2),
         ]
         result = await generate_episode_audio(
-            tts=mock_tts, segments=segments, episode_id="ep1",
+            tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
         )
         # Pipeline continues — episode_done, not episode_failed
         assert result.episode_done is not None

@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 
 from audio.budget import record as record_budget
 from audio.config import VOICE_MAP, NARRATOR_VOICE_ID, PIPELINE_TIMEOUT_SEC
 from audio.events import EpisodeDone, EpisodeFailed, SegmentDone
 from audio.tts import TTSClient, SegmentResult
+from producer.script import SegmentScript
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +40,15 @@ class AudioResult:
 
 async def generate_episode_audio(
     tts: TTSClient,
-    segments: list[dict],
+    segments: AsyncIterator[SegmentScript],
     episode_id: str,
     on_segment_done: OnSegmentDone | None = None,
 ) -> AudioResult:
     """Generate audio for all segments in an episode.
 
     Segment 0 fires first (critical path — user is waiting).
-    Segments 1-N fire in parallel after segment 0 completes.
+    Segments 1-N dispatch as async tasks as the iterator yields them,
+    enabling producer↔audio parallelism.
     The on_segment_done callback fires immediately as each segment
     finishes, enabling real-time SSE emission per the design spec.
 
@@ -56,7 +58,7 @@ async def generate_episode_audio(
 
     Args:
         tts: TTSClient instance (pre-configured with API key and output dir).
-        segments: list of SegmentScript dicts from Producer.
+        segments: AsyncIterator of SegmentScript dicts from Producer.
         episode_id: unique episode identifier.
         on_segment_done: async callback fired per segment completion.
             Receives a SegmentDone event. Caller uses this to emit SSE
@@ -65,20 +67,16 @@ async def generate_episode_audio(
     Returns:
         AudioResult with all collected results and events.
     """
-    # Validate segment dicts upfront — fail fast with clear errors
-    for i, seg in enumerate(segments):
-        for key in ("agent", "script"):
-            if key not in seg:
-                raise KeyError(
-                    f"Segment {i} missing required key '{key}'. "
-                    f"Got keys: {list(seg.keys())}"
-                )
-
     result = AudioResult()
-    total = len(segments)
     completed_indices: set[int] = set()
 
     async def _synth_one(seg: dict, index: int) -> None:
+        for key in ("agent", "script"):
+            if key not in seg:
+                raise KeyError(
+                    f"Segment {index} missing required key '{key}'. "
+                    f"Got keys: {list(seg.keys())}"
+                )
         agent = seg["agent"]
         voice_id = VOICE_MAP.get(agent, NARRATOR_VOICE_ID)
         try:
@@ -110,19 +108,25 @@ async def generate_episode_audio(
 
     try:
         async with asyncio.timeout(PIPELINE_TIMEOUT_SEC):
-            # Segment 0 first (critical path — user is waiting)
-            if segments:
-                await _synth_one(segments[0], 0)
+            seg_iter = segments.__aiter__()
 
-            # Segments 1-N in parallel; as_completed lets the callback
-            # fire per-segment rather than waiting for all to finish.
-            if len(segments) > 1:
-                tasks = [
-                    asyncio.create_task(_synth_one(seg, i))
-                    for i, seg in enumerate(segments[1:], start=1)
-                ]
-                for coro in asyncio.as_completed(tasks):
-                    await coro
+            try:
+                seg_0 = await seg_iter.__anext__()
+            except StopAsyncIteration:
+                seg_0 = None
+
+            if seg_0 is not None:
+                await _synth_one(seg_0, 0)
+
+                tasks: list[asyncio.Task] = []
+                index = 1
+                async for seg in seg_iter:
+                    tasks.append(asyncio.create_task(_synth_one(seg, index)))
+                    index += 1
+
+                if tasks:
+                    for coro in asyncio.as_completed(tasks):
+                        await coro
     except TimeoutError:
         logger.error("Pipeline timeout (%ds) exceeded", PIPELINE_TIMEOUT_SEC)
     except Exception as exc:
@@ -135,6 +139,8 @@ async def generate_episode_audio(
     # Sort results by segment index (parallel dispatch completes non-deterministically)
     result.segment_results.sort(key=lambda r: r["segment_index"])
     result.segment_done_events.sort(key=lambda e: e.segment_index)
+
+    total = len(completed_indices) + len(result.skipped_segments)
 
     # Determine terminal event
     if completed_indices:
