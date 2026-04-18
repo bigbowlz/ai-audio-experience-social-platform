@@ -98,6 +98,135 @@ class TestAqiCategory:
         assert aqi_category(aqi) == expected
 
 
+# ── Day-blocks parser tests ──
+
+
+class TestParseDayBlocks:
+    """_parse_day_blocks splits daily data into day_past + day_ahead."""
+
+    def _daily(self, **overrides) -> dict:
+        base = {
+            "high_f": 75.0,
+            "low_f": 55.0,
+            "sunrise": "06:30",
+            "sunset": "19:45",
+            "max_uv": 7.0,
+            "total_precipitation_mm": 3.0,
+            "dominant_condition": "partly_cloudy",
+        }
+        base.update(overrides)
+        return base
+
+    def _hourly(self, temps: list[float]) -> list[dict]:
+        return [
+            {
+                "hour": i,
+                "temperature_f": t,
+                "feels_like_f": t,
+                "condition": "clear",
+                "precipitation_probability": 0,
+                "precipitation_mm": 0.0,
+                "wind_speed_kmh": 10.0,
+                "wind_direction": "N",
+                "visibility_km": 10.0,
+                "uv_index": 3.0,
+                "humidity": 50,
+            }
+            for i, t in enumerate(temps)
+        ]
+
+    def test_sunrise_past_populates_day_past(self):
+        from agents.weather.agent import _parse_day_blocks
+        day_past, _ = _parse_day_blocks(
+            self._daily(sunrise="06:30"), self._hourly([70.0] * 10), 0.0, current_hour=10
+        )
+        assert day_past["sunrise"] == "06:30"
+
+    def test_sunrise_upcoming_none_in_day_past(self):
+        from agents.weather.agent import _parse_day_blocks
+        day_past, _ = _parse_day_blocks(
+            self._daily(sunrise="06:30"), self._hourly([70.0] * 2), 0.0, current_hour=5
+        )
+        assert day_past["sunrise"] is None
+
+    def test_high_f_populated_after_peak_hour(self):
+        from agents.weather.agent import _parse_day_blocks
+        day_past, _ = _parse_day_blocks(
+            self._daily(high_f=75.0), self._hourly([68.0] * 5), 0.0, current_hour=15
+        )
+        assert day_past["high_f"] == 75.0
+
+    def test_high_f_none_before_peak_hour(self):
+        from agents.weather.agent import _parse_day_blocks
+        day_past, _ = _parse_day_blocks(
+            self._daily(high_f=75.0), self._hourly([68.0] * 14), 0.0, current_hour=10
+        )
+        assert day_past["high_f"] is None
+
+    def test_precipitation_mm_so_far(self):
+        from agents.weather.agent import _parse_day_blocks
+        day_past, _ = _parse_day_blocks(
+            self._daily(), self._hourly([68.0] * 20), past_precip_mm=2.5, current_hour=4
+        )
+        assert day_past["precipitation_mm_so_far"] == 2.5
+
+    def test_day_ahead_high_is_hourly_max(self):
+        from agents.weather.agent import _parse_day_blocks
+        _, day_ahead = _parse_day_blocks(
+            self._daily(), self._hourly([60.0, 65.0, 72.0, 68.0, 63.0]), 0.0, current_hour=12
+        )
+        assert day_ahead["high_f"] == 72.0
+
+    def test_day_ahead_low_is_hourly_min(self):
+        from agents.weather.agent import _parse_day_blocks
+        _, day_ahead = _parse_day_blocks(
+            self._daily(), self._hourly([60.0, 65.0, 72.0, 68.0, 55.0]), 0.0, current_hour=12
+        )
+        assert day_ahead["low_f"] == 55.0
+
+    def test_sunset_upcoming_in_day_ahead(self):
+        from agents.weather.agent import _parse_day_blocks
+        _, day_ahead = _parse_day_blocks(
+            self._daily(sunset="19:45"), self._hourly([68.0] * 8), 0.0, current_hour=12
+        )
+        assert day_ahead["sunset"] == "19:45"
+
+    def test_sunset_past_none_in_day_ahead(self):
+        from agents.weather.agent import _parse_day_blocks
+        _, day_ahead = _parse_day_blocks(
+            self._daily(sunset="19:45"), self._hourly([62.0] * 3), 0.0, current_hour=21
+        )
+        assert day_ahead["sunset"] is None
+
+    def test_hours_remaining_matches_hourly_len(self):
+        from agents.weather.agent import _parse_day_blocks
+        _, day_ahead = _parse_day_blocks(
+            self._daily(), self._hourly([68.0] * 7), 0.0, current_hour=17
+        )
+        assert day_ahead["hours_remaining"] == 7
+
+    def test_day_ahead_carries_full_day_aggregates(self):
+        from agents.weather.agent import _parse_day_blocks
+        _, day_ahead = _parse_day_blocks(
+            self._daily(total_precipitation_mm=3.0, dominant_condition="rain", max_uv=7.5),
+            self._hourly([68.0] * 6),
+            0.0,
+            current_hour=18,
+        )
+        assert day_ahead["total_precipitation_mm"] == 3.0
+        assert day_ahead["dominant_condition"] == "rain"
+        assert day_ahead["max_uv"] == 7.5
+
+    def test_empty_hourly_forecast_degrades_gracefully(self):
+        from agents.weather.agent import _parse_day_blocks
+        _, day_ahead = _parse_day_blocks(
+            self._daily(), [], 0.0, current_hour=23
+        )
+        assert day_ahead["high_f"] is None
+        assert day_ahead["low_f"] is None
+        assert day_ahead["hours_remaining"] == 0
+
+
 # ── Notable facts tests ──
 
 
@@ -115,9 +244,9 @@ def _make_weather_data(
     current_visibility: float = 10.0,
     aqi: int | None = None,
 ) -> dict:
-    """Build a minimal weather data dict for notable_facts input."""
-    # Default: 24 hours of calm weather
+    """Build a minimal weather data dict for notable_facts / narrative_compiler input."""
     hours = 24
+    hourly_temps = [68.0] * hours
     return {
         "current": {
             "temperature_f": current_temp,
@@ -132,8 +261,8 @@ def _make_weather_data(
         "hourly_forecast": [
             {
                 "hour": h,
-                "temperature_f": 68.0,
-                "feels_like_f": 68.0,
+                "temperature_f": hourly_temps[h],
+                "feels_like_f": hourly_temps[h],
                 "condition": "clear",
                 "precipitation_probability": (hourly_precip_prob or [0] * hours)[h],
                 "precipitation_mm": 0.0,
@@ -145,14 +274,21 @@ def _make_weather_data(
             }
             for h in range(hours)
         ],
-        "daily": {
+        # day_past / day_ahead replace the old daily block.
+        # Fixture assumes current_hour=10 (morning): high not yet peaked, sunrise past.
+        "day_past": {
+            "sunrise": "06:30",
+            "high_f": None,           # hour < 15, peak not yet reached
+            "precipitation_mm_so_far": 0.0,
+        },
+        "day_ahead": {
             "high_f": high,
             "low_f": low,
-            "sunrise": "06:30",
+            "hours_remaining": hours,
             "sunset": "19:30",
-            "max_uv": max(hourly_uv or [3.0]),
             "total_precipitation_mm": 0.0,
             "dominant_condition": "clear",
+            "max_uv": max(hourly_uv or [3.0]),
         },
         "air_quality": (
             {"aqi": aqi, "pm25": 10.0, "pm10": 15.0, "category": "good"}
@@ -199,6 +335,133 @@ class TestNotableFacts:
         precip_facts = [f for f in facts if f["category"] == "precipitation"]
         assert len(precip_facts) == 1
         assert precip_facts[0]["hour"] == 17
+
+    def test_precipitation_peak_mm_selection(self):
+        """With multiple qualifying hours, surface the peak-mm hour, not the first.
+
+        Mirrors a real Open-Meteo response: drizzle at hour 0 (0.7mm, 68%),
+        heavy rain at hour 2 (7.8mm, 84%). The 7.8mm hour is the story.
+        """
+        from agents.weather.agent import notable_facts
+        data = _make_weather_data()
+        data["hourly_forecast"][0].update({"precipitation_probability": 68, "precipitation_mm": 0.7})
+        data["hourly_forecast"][1].update({"precipitation_probability": 87, "precipitation_mm": 0.2})
+        data["hourly_forecast"][2].update({"precipitation_probability": 84, "precipitation_mm": 7.8})
+        data["hourly_forecast"][3].update({"precipitation_probability": 76, "precipitation_mm": 0.1})
+        data["hourly_forecast"][4].update({"precipitation_probability": 68, "precipitation_mm": 0.8})
+        facts = notable_facts(data)
+        precip = next(f for f in facts if f["category"] == "precipitation")
+        # Notable anchor is the peak-mm hour (2), not the first qualifying hour (0)
+        assert precip["hour"] == 2
+        # Summary mentions start (0:00) AND peak (2:00), the mm amount, and peak prob
+        assert "0:00" in precip["summary"]
+        assert "2:00" in precip["summary"]
+        assert "7.8" in precip["summary"]
+        assert "84" in precip["summary"]
+
+    def test_precipitation_single_qualifying_hour_no_start_note(self):
+        """One qualifying hour: summary does not mention a separate start."""
+        from agents.weather.agent import notable_facts
+        data = _make_weather_data()
+        data["hourly_forecast"][15].update({"precipitation_probability": 75, "precipitation_mm": 3.2})
+        facts = notable_facts(data)
+        precip = next(f for f in facts if f["category"] == "precipitation")
+        assert precip["hour"] == 15
+        assert "3.2" in precip["summary"]
+        assert "75" in precip["summary"]
+        assert "start" not in precip["summary"].lower()
+        assert "heaviest" not in precip["summary"].lower()
+
+    def test_precipitation_contiguous_same_hour_peak_and_start(self):
+        """When peak-mm hour is also the first qualifying hour, no start/peak split."""
+        from agents.weather.agent import notable_facts
+        data = _make_weather_data()
+        data["hourly_forecast"][10].update({"precipitation_probability": 90, "precipitation_mm": 5.0})
+        data["hourly_forecast"][11].update({"precipitation_probability": 75, "precipitation_mm": 1.5})
+        facts = notable_facts(data)
+        precip = next(f for f in facts if f["category"] == "precipitation")
+        assert precip["hour"] == 10
+        assert "start" not in precip["summary"].lower()
+        assert "heaviest" not in precip["summary"].lower()
+
+    def test_uv_hour_labeled_tomorrow_when_wrapped(self):
+        """When hourly_forecast wraps past midnight, UV peak summary says 'tomorrow'."""
+        from agents.weather.agent import notable_facts
+        data = _make_weather_data()
+        # Rotate to simulate current_hour=22: hours 22,23,0,1,...,21
+        rotated = [dict(h) for h in data["hourly_forecast"]]
+        for idx, h in enumerate(rotated):
+            h["hour"] = (22 + idx) % 24
+        data["hourly_forecast"] = rotated
+        # UV peak at sequence index 15 -> hour (22+15)%24 = 13 (tomorrow)
+        rotated[15]["uv_index"] = 8.0
+        # Keep sunset upcoming so UV isn't suppressed
+        data["day_ahead"]["sunset"] = "19:30"
+        facts = notable_facts(data)
+        uv = next(f for f in facts if f["category"] == "uv")
+        assert "13:00 tomorrow" in uv["summary"]
+
+    def test_uv_hour_no_tomorrow_when_same_day(self):
+        """UV peak today — no 'tomorrow' suffix."""
+        from agents.weather.agent import notable_facts
+        uv = [2.0] * 10 + [8.0] + [2.0] * 13
+        data = _make_weather_data(hourly_uv=uv)
+        facts = notable_facts(data)
+        uv_fact = next(f for f in facts if f["category"] == "uv")
+        assert "tomorrow" not in uv_fact["summary"]
+
+    def test_uv_suppressed_when_sunset_past_and_peak_tomorrow(self):
+        """At night with UV peak wrapped into tomorrow, the fact is suppressed as stale."""
+        from agents.weather.agent import notable_facts
+        data = _make_weather_data()
+        rotated = [dict(h) for h in data["hourly_forecast"]]
+        for idx, h in enumerate(rotated):
+            h["hour"] = (22 + idx) % 24
+        data["hourly_forecast"] = rotated
+        rotated[15]["uv_index"] = 8.0  # hour 13 tomorrow
+        data["day_ahead"]["sunset"] = None  # sunset past
+        facts = notable_facts(data)
+        uv_facts = [f for f in facts if f["category"] == "uv"]
+        assert uv_facts == []
+
+    def test_uv_kept_when_sunset_past_but_peak_today(self):
+        """If UV peak is still today (hasn't wrapped), keep it even after sunset."""
+        from agents.weather.agent import notable_facts
+        data = _make_weather_data()
+        rotated = [dict(h) for h in data["hourly_forecast"]]
+        for idx, h in enumerate(rotated):
+            h["hour"] = (22 + idx) % 24
+        data["hourly_forecast"] = rotated
+        rotated[0]["uv_index"] = 8.0  # hour 22 today (edge case, keeps logic honest)
+        data["day_ahead"]["sunset"] = None
+        facts = notable_facts(data)
+        uv_facts = [f for f in facts if f["category"] == "uv"]
+        assert len(uv_facts) == 1
+
+    def test_precipitation_wrapped_hours_labeled_tomorrow(self):
+        """Precip hours that wrap past midnight get 'tomorrow' labels."""
+        from agents.weather.agent import notable_facts
+        data = _make_weather_data()
+        rotated = [dict(h) for h in data["hourly_forecast"]]
+        for idx, h in enumerate(rotated):
+            h["hour"] = (22 + idx) % 24
+        data["hourly_forecast"] = rotated
+        # Start at sequence idx 2 (hour 0 tomorrow), peak at idx 4 (hour 2 tomorrow)
+        rotated[2].update({"precipitation_probability": 68, "precipitation_mm": 0.7})
+        rotated[3].update({"precipitation_probability": 87, "precipitation_mm": 0.2})
+        rotated[4].update({"precipitation_probability": 84, "precipitation_mm": 7.8})
+        facts = notable_facts(data)
+        precip = next(f for f in facts if f["category"] == "precipitation")
+        assert "0:00 tomorrow" in precip["summary"]
+        assert "2:00 tomorrow" in precip["summary"]
+
+    def test_temperature_swing_summary_drops_today(self):
+        """Temp swing summary no longer includes 'today' — data may span midnight."""
+        from agents.weather.agent import notable_facts
+        data = _make_weather_data(high=90.0, low=60.0)
+        facts = notable_facts(data)
+        temp = next(f for f in facts if "swings" in f["summary"].lower())
+        assert "today" not in temp["summary"].lower()
 
     def test_high_wind_detected(self):
         from agents.weather.agent import notable_facts
@@ -493,7 +756,9 @@ class TestFetchContext:
         assert isinstance(ctx["weather_summary"], str)
         assert "current" in ctx
         assert "hourly_forecast" in ctx
-        assert "daily" in ctx
+        assert "day_past" in ctx
+        assert "day_ahead" in ctx
+        assert "daily" not in ctx  # replaced by the two split blocks
         assert "notable_facts" in ctx
         assert "location_name" in ctx
         assert ctx["location_name"] == "San Francisco, CA"
@@ -568,6 +833,64 @@ class TestFetchContext:
         assert current["wind_direction"] == "S"  # 180 degrees
         assert current["humidity"] == 55
         assert current["visibility_km"] == 10.0  # 10000m / 1000
+
+    def test_day_past_and_day_ahead_shape(self):
+        """fetch_context produces day_past + day_ahead with time-aware fields."""
+        from unittest.mock import patch, MagicMock
+        from agents.weather.agent import WeatherAgent
+
+        agent = WeatherAgent()
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get = MagicMock(side_effect=_mock_httpx_get())
+
+        with patch("agents.weather.agent.httpx.Client", return_value=mock_client):
+            with patch("agents.weather.agent._get_user_location",
+                       return_value=(37.7749, -122.4194, "San Francisco, CA")):
+                with patch("agents.weather.agent._current_hour", return_value=17):
+                    ctx = agent.fetch_context("user1")
+
+        # At 17:00: sunrise (06:42) is past, sunset (19:58) is upcoming,
+        # high likely peaked (current_hour >= 15).
+        day_past = ctx["day_past"]
+        day_ahead = ctx["day_ahead"]
+
+        assert day_past["sunrise"] == "06:42"
+        assert day_past["high_f"] == 26.0
+        assert day_past["precipitation_mm_so_far"] == 0.0  # FORECAST_RESPONSE has 0 precip
+
+        assert day_ahead["sunset"] == "19:58"
+        assert day_ahead["hours_remaining"] == 24
+        assert day_ahead["high_f"] is not None
+        assert day_ahead["low_f"] is not None
+        assert day_ahead["total_precipitation_mm"] == 0.0
+        assert day_ahead["dominant_condition"] == "partly_cloudy"
+        assert day_ahead["max_uv"] == 5.0
+
+    def test_day_past_early_morning(self):
+        """Before sunrise and peak: sunrise None, high_f None, sunset upcoming."""
+        from unittest.mock import patch, MagicMock
+        from agents.weather.agent import WeatherAgent
+
+        agent = WeatherAgent()
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get = MagicMock(side_effect=_mock_httpx_get())
+
+        with patch("agents.weather.agent.httpx.Client", return_value=mock_client):
+            with patch("agents.weather.agent._get_user_location",
+                       return_value=(37.7749, -122.4194, "San Francisco, CA")):
+                with patch("agents.weather.agent._current_hour", return_value=4):
+                    ctx = agent.fetch_context("user1")
+
+        day_past = ctx["day_past"]
+        day_ahead = ctx["day_ahead"]
+
+        assert day_past["sunrise"] is None
+        assert day_past["high_f"] is None
+        assert day_ahead["sunset"] == "19:58"
 
     def test_hourly_forecast_24h_window(self):
         from unittest.mock import patch, MagicMock
@@ -677,6 +1000,32 @@ class TestPitch:
         }
         pitches = agent.pitch(self._make_brief(), bootstrap_memory(), ctx, "user1")
         assert pitches[0]["claim_kind"] == "neutral"
+
+    def test_pitch_data_contains_day_past_and_day_ahead(self):
+        """Pitch data dict carries the split blocks, not the old daily block."""
+        from agents.weather.agent import WeatherAgent
+        from agents.protocol import bootstrap_memory
+
+        agent = WeatherAgent()
+        day_past = {"sunrise": "06:30", "high_f": None, "precipitation_mm_so_far": 0.0}
+        day_ahead = {
+            "high_f": 75.0, "low_f": 55.0, "hours_remaining": 12,
+            "sunset": "19:45",
+            "total_precipitation_mm": 0.0, "dominant_condition": "clear", "max_uv": 6.0,
+        }
+        ctx = {
+            "weather_summary": "Currently 22C and clear.",
+            "notable_facts": [],
+            "location_name": "San Francisco, CA",
+            "day_past": day_past,
+            "day_ahead": day_ahead,
+        }
+        pitches = agent.pitch(self._make_brief(), bootstrap_memory(), ctx, "user1")
+
+        data = pitches[0]["data"]
+        assert data["day_past"] == day_past
+        assert data["day_ahead"] == day_ahead
+        assert "daily" not in data
 
     def test_always_balanced_provenance(self):
         from agents.weather.agent import WeatherAgent
