@@ -7,8 +7,12 @@ Coverage per prompt_design.md §Test mandate (Step 1.5):
 - Fallback path (LLM timeout): all guaranteed slots get reasons
 - Fallback path (LLM timeout): bonus filled by priority-sort
 - Fallback path (LLM timeout): reasoning_summary is "{agent}: {title}"
-- Empty producer_memory {}: output deterministic for same inputs
+- Deterministic output for same inputs (ProducerMemory already applied upstream)
 - Budget gate: over-budget pitch rejected without blocking next pick
+
+Note: `producer_memory` is no longer a parameter to select_bonus_segments_llm.
+ProducerMemory is applied deterministically by apply_producer_memory() before
+pitches reach this module. See tests/test_producer_memory.py.
 """
 
 from __future__ import annotations
@@ -116,7 +120,6 @@ class TestLLMSuccessPath:
                 remaining_pitches=remaining,
                 budget_remaining_sec=budget,
                 today_context=_TODAY,
-                producer_memory={},
             )
 
         assert len(bonus) == 1
@@ -138,7 +141,6 @@ class TestLLMSuccessPath:
                 remaining_pitches=remaining,
                 budget_remaining_sec=budget,
                 today_context=_TODAY,
-                producer_memory={},
             )
 
         assert bonus == []
@@ -166,7 +168,6 @@ class TestLLMSuccessPath:
                 remaining_pitches=remaining,
                 budget_remaining_sec=budget,
                 today_context=_TODAY,
-                producer_memory={},
             )
 
         titles = [b["title"] for b in bonus]
@@ -185,7 +186,6 @@ class TestLLMSuccessPath:
                 remaining_pitches=[],
                 budget_remaining_sec=0,
                 today_context=_TODAY,
-                producer_memory={},
             )
 
         assert len(guaranteed_reasons) == 2
@@ -209,7 +209,6 @@ class TestFallbackPath:
                 remaining_pitches=remaining,
                 budget_remaining_sec=budget,
                 today_context=_TODAY,
-                producer_memory={},
             )
 
     def test_guaranteed_slots_all_get_reasons_on_fallback(self):
@@ -257,11 +256,11 @@ class TestFallbackPath:
         assert bonus[0]["reasoning_summary"] == "alices: PG essay"
 
 
-# ── Empty producer_memory ─────────────────────────────────────────────
+# ── Determinism ───────────────────────────────────────────────────────
 
-class TestEmptyProducerMemory:
+class TestDeterminism:
     def test_deterministic_output_for_same_inputs(self):
-        """Two calls with identical inputs + empty producer_memory produce identical output."""
+        """Two calls with identical inputs produce identical output."""
         guaranteed = [_pitch("youtube", "Jazz exploration", 0.91, seg_len=90)]
         remaining = [_pitch("alices", "PG essay", 0.85, seg_len=30)]
         budget = 50
@@ -276,7 +275,6 @@ class TestEmptyProducerMemory:
                     remaining_pitches=remaining,
                     budget_remaining_sec=budget,
                     today_context=_TODAY,
-                    producer_memory={},
                 )
             results.append(([b["title"] for b in bonus], [r["pitch_title"] for r in reasons]))
 
@@ -308,7 +306,6 @@ class TestBudgetGate:
                 remaining_pitches=remaining,
                 budget_remaining_sec=budget,
                 today_context=_TODAY,
-                producer_memory={},
             )
 
         titles = [b["title"] for b in bonus]
@@ -326,7 +323,37 @@ class TestBudgetGate:
                 remaining_pitches=remaining,
                 budget_remaining_sec=0,
                 today_context=_TODAY,
-                producer_memory={},
             )
 
         assert bonus == []
+
+
+# ── Fallback tie-break determinism ────────────────────────────────────
+
+class TestFallbackTieBreakDeterminism:
+    """Decision 5a: fallback path picks ties by (-priority, agent, title)."""
+
+    def test_fallback_resolves_cross_agent_ties_by_agent_asc(self, monkeypatch):
+        # Force fallback path.
+        monkeypatch.setenv("DISABLE_LLM", "1")
+        guaranteed: list[dict] = []
+        # Two pitches, identical priority, different agents.
+        # Budget allows ONE bonus pick.
+        remaining = [
+            _pitch("youtube", "y1", 0.5, seg_len=40),
+            _pitch("calendar", "c1", 0.5, seg_len=40),
+        ]
+        from producer.bonus import select_bonus_segments_llm
+        bonus, _ = select_bonus_segments_llm(
+            guaranteed_slots=guaranteed,
+            remaining_pitches=remaining,
+            budget_remaining_sec=50,  # exactly one (40 + 10 segue)
+            today_context={
+                "date": "2026-04-17", "day_of_week": "Thursday",
+                "time_of_day": "morning", "weather_summary": None,
+                "calendar_events": None,
+            },
+        )
+        assert len(bonus) == 1
+        # calendar < youtube alphabetically, so calendar wins.
+        assert bonus[0]["agent"] == "calendar"
