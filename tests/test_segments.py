@@ -47,7 +47,8 @@ class TestPhase1GuaranteedSlots:
             "calendar": [_pitch("calendar", 0.4)],
             "alices": [_pitch("alices", 0.7)],
         }
-        guaranteed, _, _ = select_guaranteed_slots(pitches)
+        order, _, _ = select_guaranteed_slots(pitches)
+        guaranteed = order["segments"]
         agents = [p["agent"] for p in guaranteed]
         assert set(agents) == {"youtube", "weather", "calendar", "alices"}
         assert len(guaranteed) == 4
@@ -60,7 +61,8 @@ class TestPhase1GuaranteedSlots:
                 _pitch("youtube", 0.3),
             ],
         }
-        guaranteed, _, _ = select_guaranteed_slots(pitches)
+        order, _, _ = select_guaranteed_slots(pitches)
+        guaranteed = order["segments"]
         assert guaranteed[0]["title"] == "top"
         assert guaranteed[0]["priority"] == 0.9
 
@@ -87,6 +89,15 @@ class TestPhase1GuaranteedSlots:
         assert len(remaining) == 1
         assert remaining[0]["suggested_length_sec"] == DEFAULT_SEGMENT_SEC["youtube"]
 
+    def test_select_guaranteed_returns_running_order_shape(self):
+        pitches = {"youtube": [_pitch("youtube", 0.9, title="a")]}
+        # Override length to make total_sec deterministic.
+        order, _, _ = select_guaranteed_slots(pitches, length_overrides={"youtube": 90})
+        assert order["guaranteed_count"] == 1
+        assert order["bonus_count"] == 0
+        assert order["total_sec"] == 90
+        assert order["segments"][0]["title"] == "a"
+
 
 class TestThinSignalPitch:
     def test_thin_signal_gets_guaranteed_slot(self):
@@ -94,7 +105,8 @@ class TestThinSignalPitch:
             "youtube": [_pitch("youtube", 0.3, thin_signal=True)],
             "weather": [_pitch("weather", 0.5)],
         }
-        guaranteed, _, _ = select_guaranteed_slots(pitches)
+        order, _, _ = select_guaranteed_slots(pitches)
+        guaranteed = order["segments"]
         yt = next(p for p in guaranteed if p["agent"] == "youtube")
         assert yt["thin_signal"] is True
 
@@ -107,19 +119,20 @@ class TestSegmentLengths:
             "calendar": [_pitch("calendar", 0.4)],
             "alices": [_pitch("alices", 0.7)],
         }
-        guaranteed, _, _ = select_guaranteed_slots(pitches)
+        order, _, _ = select_guaranteed_slots(pitches)
+        guaranteed = order["segments"]
         lengths = {p["agent"]: p["suggested_length_sec"] for p in guaranteed}
         assert lengths == DEFAULT_SEGMENT_SEC
 
     def test_overrides_respected(self):
         pitches = {"youtube": [_pitch("youtube", 0.9)]}
-        guaranteed, _, _ = select_guaranteed_slots(pitches, length_overrides={"youtube": 60})
-        assert guaranteed[0]["suggested_length_sec"] == 60
+        order, _, _ = select_guaranteed_slots(pitches, length_overrides={"youtube": 60})
+        assert order["segments"][0]["suggested_length_sec"] == 60
 
     def test_over_max_is_clamped(self):
         pitches = {"youtube": [_pitch("youtube", 0.9)]}
-        guaranteed, _, _ = select_guaranteed_slots(pitches, length_overrides={"youtube": 200})
-        assert guaranteed[0]["suggested_length_sec"] == MAX_SEGMENT_SEC
+        order, _, _ = select_guaranteed_slots(pitches, length_overrides={"youtube": 200})
+        assert order["segments"][0]["suggested_length_sec"] == MAX_SEGMENT_SEC
 
 
 class TestBudgetMath:
@@ -186,8 +199,8 @@ class TestTieBreakDeterminism:
                 self._p("youtube", "alpha", 0.9),  # same priority, alpha < zebra
             ],
         }
-        guaranteed, _, _ = select_guaranteed_slots(pitches)
-        assert guaranteed[0]["title"] == "alpha"
+        order, _, _ = select_guaranteed_slots(pitches)
+        assert order["segments"][0]["title"] == "alpha"
 
     def test_same_priority_across_agents_resolves_by_agent_asc(self):
         # Two agents with their top pitch tied — agent name ASC wins.
@@ -195,8 +208,8 @@ class TestTieBreakDeterminism:
             "youtube": [self._p("youtube", "y", 0.7)],
             "calendar": [self._p("calendar", "c", 0.7)],
         }
-        guaranteed, _, _ = select_guaranteed_slots(pitches)
+        order, _, _ = select_guaranteed_slots(pitches)
         # Both win their guaranteed slots (one per agent), but iteration
-        # order in `guaranteed` should be deterministic by agent ASC.
-        agents = [p["agent"] for p in guaranteed]
+        # order in `segments` should be deterministic by agent ASC.
+        agents = [p["agent"] for p in order["segments"]]
         assert agents == sorted(agents)  # ["calendar", "youtube"]

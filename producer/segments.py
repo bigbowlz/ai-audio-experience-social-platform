@@ -8,7 +8,7 @@ Spec: agents/docs/prompt_design.md §4 Step 1
 
 from __future__ import annotations
 
-from agents.protocol import Pitch
+from agents.protocol import Pitch, RunningOrder
 
 
 TARGET_EPISODE_SECS = 450
@@ -45,11 +45,13 @@ def _segment_length(pitch: Pitch, overrides: dict[str, int] | None = None) -> in
 def select_guaranteed_slots(
     pitches_by_agent: dict[str, list[Pitch]],
     length_overrides: dict[str, int] | None = None,
-) -> tuple[list[Pitch], list[Pitch], int]:
+) -> tuple[RunningOrder, list[Pitch], int]:
     """Phase 1 (deterministic): one guaranteed slot per agent.
 
     Returns:
-        guaranteed: highest-priority pitch per agent with suggested_length_sec set.
+        order: RunningOrder with `segments` = guaranteed slots only,
+            `bonus_count = 0`. Step 1.5 will return an updated RunningOrder
+            with bonus segments appended (see append_bonus()).
         remaining: unselected pitches with suggested_length_sec set; candidates
             for Step 1.5 (LLM bonus selection).
         budget_remaining_sec: seconds available for bonus slots, after
@@ -62,6 +64,8 @@ def select_guaranteed_slots(
 
     The segue count is N-1 because the cold open already includes the
     transition into segment 1 (OPEN_CLOSE_SECS covers that).
+
+    See decision 4a in docs/specs/2026-04-17-producer-alignment-plan.md.
     """
     guaranteed: list[Pitch] = []
     remaining: list[Pitch] = []
@@ -85,4 +89,21 @@ def select_guaranteed_slots(
     budget -= sum(p["suggested_length_sec"] for p in guaranteed)
     budget -= SEGUE_OVERHEAD_SECS * max(0, len(guaranteed) - 1)
 
-    return guaranteed, remaining, budget
+    order: RunningOrder = {
+        "segments": guaranteed,
+        "total_sec": sum(p["suggested_length_sec"] for p in guaranteed),
+        "guaranteed_count": len(guaranteed),
+        "bonus_count": 0,
+    }
+    return order, remaining, budget
+
+
+def append_bonus(order: RunningOrder, bonus: list[Pitch]) -> RunningOrder:
+    """Pure: returns a new RunningOrder with `bonus` appended to segments."""
+    new_segments = order["segments"] + bonus
+    return {
+        "segments": new_segments,
+        "total_sec": sum(p["suggested_length_sec"] for p in new_segments),
+        "guaranteed_count": order["guaranteed_count"],
+        "bonus_count": len(bonus),
+    }

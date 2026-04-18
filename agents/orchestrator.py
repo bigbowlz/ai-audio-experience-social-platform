@@ -152,17 +152,56 @@ if __name__ == "__main__":
             print(f"          hook: {p['hook'][:90]}…" if len(p['hook']) > 90 else f"          hook: {p['hook']}")
         print()
 
-    # ── Segment selection (deterministic) ───────────────────────────
-    from producer.segments import select_segments
+    # ── Step 0.5: apply ProducerMemory deterministically ────────────
+    # Memory is NEVER passed to an LLM prompt; it's applied here as a
+    # pure transform on `priority`. See producer/docs/DESIGN.md.
+    from producer.memory import (
+        apply_producer_memory,
+        build_memory_applied_event,
+        load_producer_memory,
+    )
 
-    selected = select_segments(pitches_by_agent)
-    print(f"── Running order ({len(selected)} segments) ──")
-    for i, seg in enumerate(selected):
-        length = seg.get('suggested_length_sec', '?')
-        print(f"  {i+1}. [{seg['agent']}] {seg['title']} ({length}s)")
+    producer_memory = load_producer_memory(args.user_id)
+    raw_pitches_by_agent = pitches_by_agent
+    pitches_by_agent = apply_producer_memory(pitches_by_agent, producer_memory)
+    memory_event = build_memory_applied_event(
+        producer_memory, raw_pitches_by_agent, pitches_by_agent
+    )
+    if memory_event is not None:
+        print("── producer.memory.applied ──")
+        print(json.dumps(memory_event, indent=2))
+        print()
+
+    # ── Step 1: deterministic Phase 1 — guaranteed slots ────────────
+    from producer.segments import select_guaranteed_slots
+
+    order, remaining, bonus_budget = select_guaranteed_slots(pitches_by_agent)
+    print(f"── Guaranteed slots ({order['guaranteed_count']}; {bonus_budget}s bonus budget) ──")
+    for p in order["segments"]:
+        print(f"  [{p['agent']}] {p['title']} ({p['suggested_length_sec']}s)")
     print()
 
-    # ── Producer LLM pass ───────────────────────────────────────────
+    # ── Step 1.5: LLM bonus selection ───────────────────────────────
+    from producer.bonus import select_bonus_segments_llm
+    from producer.segments import append_bonus
+
+    bonus, guaranteed_reasons = select_bonus_segments_llm(
+        guaranteed_slots=order["segments"],
+        remaining_pitches=remaining,
+        budget_remaining_sec=bonus_budget,
+        today_context=brief["today_context"],
+    )
+    order = append_bonus(order, bonus)
+    selected = order["segments"]
+    print(f"── Bonus slots ({len(bonus)}) ──")
+    for p in bonus:
+        print(
+            f"  [{p['agent']}] {p['title']} ({p['suggested_length_sec']}s) "
+            f"— {p.get('reasoning_summary', '')}"
+        )
+    print()
+
+    # ── Step 2: Producer LLM script pass ────────────────────────────
     if args.no_llm:
         print("[orchestrator] --no-llm: skipping Producer script generation.")
         print(json.dumps(selected, indent=2))
