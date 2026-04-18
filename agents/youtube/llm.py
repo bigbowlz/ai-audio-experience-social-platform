@@ -26,7 +26,7 @@ from agents.youtube.guardrails import ClaimKind, ProvenanceShape
 
 # ── Constants ────────────────────────────────────────────────────────
 
-MODEL = os.environ.get("YOUTUBE_LLM_MODEL", "claude-sonnet-4-20250514")
+MODEL = os.environ.get("YOUTUBE_LLM_MODEL", "claude-sonnet-4-6")
 MAX_TOKENS = 2048
 
 # ── System prompt ────────────────────────────────────────────────────
@@ -178,13 +178,15 @@ def generate_pitches(
         claim_kind = item["claim_kind"]
         prov_shape = item["provenance_shape"]
 
-        # source_refs from provenance
+        # source_refs from provenance (human-readable names for downstream LLM consumption)
         source_refs = []
         for c in contributors:
             if c["kind"] == "sub":
-                source_refs.append(c["channel_id"])
-            elif c["video_id"]:
-                source_refs.append(c["video_id"])
+                source_refs.append(c["channel_name"])
+            elif c["video_title"]:
+                source_refs.append(c["video_title"])
+            else:
+                source_refs.append(c["channel_name"])
 
         pitches.append(Pitch(
             agent=agent_name,
