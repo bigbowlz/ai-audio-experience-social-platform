@@ -241,7 +241,7 @@ All `fetch_context()` calls run in parallel. The orchestrator waits for all to c
 
 ### Constraints
 
-- **v0 target:** 6-minute episode. v1: variable (use case: commute, bedtime).
+- **v0 target:** 7.5-minute episode. v1: variable (use case: commute, bedtime).
 - **Per-agent guarantee:** each agent gets ≥1 segment. Users signal interest in an agent by selecting it before generation — giving an agent zero airtime contradicts their selection.
 - **Input:** 3–5 `Pitch` objects per agent (or 1 thin-signal Pitch), total 4–21 pitches across 4 agents.
 - **Output:** full episode script (cold open + ordered segments with per-segment scripts + segues + sign-off).
@@ -269,7 +269,7 @@ Two fields added to `Pitch` for Producer consumption (set by the algo step in ea
 ### Step 1: deterministic prelude (segment selection + time budget)
 
 ```python
-TARGET_EPISODE_SECS = 360          # 6 min for v0; v1 reads from Brief or user pref
+TARGET_EPISODE_SECS = 450          # 7.5 min for v0; v1 reads from Brief or user pref
 SEGUE_OVERHEAD_SECS = 10           # per inter-segment segue
 OPEN_CLOSE_SECS = 25               # cold open (15s, includes transition into segment 1) + sign-off (10s)
 MAX_SEGMENT_SEC = 90               # cap per segment; prevents budget overflow from guaranteed slots
@@ -326,7 +326,7 @@ def select_segments(
 
 **Segment length ownership (decided 2026-04-16).** Agents do not set `suggested_length_sec`. Producer assigns lengths from `DEFAULT_SEGMENT_SEC` (a per-agent lookup) and can override via `length_overrides` (e.g. from Producer memory learning per-agent length biases, or from user preferences). The `suggested_length_sec` field on selected pitches is set by Producer during `select_segments()`, not by agents during `pitch()`. When marketplace agents arrive, the default moves to `DataAgent` metadata so unknown agents can self-describe.
 
-**Budget arithmetic for v0:** 360s total − 25s open/close = 335s. 4 guaranteed segments capped at 90s each = 360s max + 3 segues × 10s = 30s → 335 − 360 − 30 = −55s worst case without the cap. With `MAX_SEGMENT_SEC = 90`, guaranteed slots are bounded at 360s + 30s segues = 390s, which still exceeds the 335s budget. Default lengths (youtube=90, weather=45, calendar=30, alices=90) total 255s + 3 segues = 285s, well within the 335s budget, leaving 50s for a bonus slot. The Producer's LLM receives `target_total_secs` and adjusts segment scripts to fit. Typical v0 episode: 4 segments, possibly 5 if segments are short. The per-agent guarantee consumes most of the budget by design — it's a 6-minute show.
+**Budget arithmetic for v0:** 450s total − 25s open/close = 425s. 4 guaranteed segments capped at 90s each = 360s max + 3 segues × 10s = 30s → 425 − 360 − 30 = 35s worst case with the cap. With `MAX_SEGMENT_SEC = 90`, guaranteed slots are bounded at 360s + 30s segues = 390s, leaving 35s of headroom. Default lengths (youtube=90, weather=45, calendar=30, alices=90) total 255s + 3 segues = 285s, leaving 140s for bonus slots. The Producer's LLM receives `target_total_secs` and adjusts segment scripts to fit. Typical v0 episode: 4 guaranteed segments plus 1–2 bonus slots. The 7.5-minute target gives Step 1.5 (LLM bonus selection) visible room to operate — important for demoing bonus selection live.
 
 **Cold open → segment 1 transition.** `cold_open` includes the lead-in to segment 1. There is no separate segue between them. Segment 1's `segue_in` is empty. This is reflected in the `OPEN_CLOSE_SECS` budget (15s for the cold open that transitions into segment 1, 10s for the sign-off) and in the segue count (`len(selected) - 1` inter-segment segues, not including a cold-open-to-segment-1 segue).
 
@@ -567,7 +567,7 @@ Producer's LLM receives:
         "weather_summary": "rainy, 14°C",
         "calendar_events": ["Team standup 10am", "Dentist 3pm"],
     },
-    "target_total_secs": 360,
+    "target_total_secs": 450,
     "producer_memory": { ... },     # stub — cross-episode ordering priors, learning-loop session
 }
 ```
