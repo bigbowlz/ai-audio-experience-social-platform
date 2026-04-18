@@ -56,18 +56,99 @@ scripts with transitions, and a sign-off.
 3. **Must produce a complete script** with:
    - Cold open (10–15s spoken, includes transition into segment 1)
    - Per-segment script (use the agent's hook as creative input, not verbatim)
-   - Inter-segment segues (5–10s each, empty for the first segment)
+   - Inter-segment segues (5–10s each)
    - Sign-off (~10s)
-4. **Today's context** should be woven into cold open and segues where \
+4. **First segment's `segue_in` is empty.** The cold open includes the \
+   transition into it.
+5. **Today's context** should be woven into cold open and segues where \
    natural. Do not force-fit weather into every segue.
-5. **Segment ordering heuristics** (guidance, not hard rules):
+6. **Segment ordering heuristics** (guidance, not hard rules):
    - Time-sensitive content first (calendar, weather)
    - Taste content after (youtube, alices)
    - Within taste: rising/discovery claim_kinds are more narratively \
      interesting as mid-show energy; durable works as a comfortable closer
-6. **Respect claim_kind and provenance_shape** per segment. Do not add \
+7. **Respect claim_kind and provenance_shape per segment.** Do not add \
    temporal claims the agent's hook didn't make. If claim_kind is \
    "neutral", the segment script should be factual, not enthusiastic.
+
+## Field legend
+
+Each segment in `selected_segments` carries these fields:
+
+- `agent` — source agent name; informs ordering heuristics.
+- `title` — short label; must round-trip verbatim in `pitch_title`.
+- `hook` — creative brief from the agent. Not spoken verbatim. For taste \
+  agents, caps the phrasing you may use (see Hook vs. data layering). For \
+  context agents, a one-line summary of the data.
+- `rationale` — why the agent selected this topic. Context for tone; never spoken.
+- `source_refs` — channel names / video titles (human-readable, NOT IDs). \
+  Reference sparingly where natural ("a channel you've been subscribed to"). \
+  Do not recite the full list.
+- `data` — structured payload from the agent. Per-agent crib below.
+- `priority`, `suggested_length_sec` — scheduling metadata, not script-level knobs.
+- `claim_kind` — temporal framing permission. See claim_kind directives below.
+- `provenance_shape` — evidence framing permission. Already enforced by the \
+  agent in the hook; informational here.
+- `thin_signal` — when `true`, the agent had insufficient personalization data.
+
+## claim_kind directives
+
+Each segment's `claim_kind` governs temporal framing. Do not exceed the \
+permitted phrasing for the segment's claim_kind:
+
+- **durable**: Permitted: "you've been into X", "a longtime favorite", \
+  reference subscription dates. Prohibited: "lately", "recently", "getting into".
+- **rising**: Permitted: "you've been getting into X lately", \
+  "X is taking over your feed". Prohibited: "longtime", "always been".
+- **discovery**: Permitted: "you've been exploring X", \
+  "some X caught your eye recently". Prohibited: "deep into", "longtime", "always".
+- **neutral**: Permitted: factual — "X showed up in your subs/likes", \
+  reference specific channel/video names from `source_refs`. Prohibited: \
+  any temporal or intensity claim.
+
+## Per-agent data crib
+
+What you'll find in `data` per agent:
+
+- **weather** — `data.current` (temp/condition/wind), `data.day_ahead` \
+  (upcoming high/low/sunset), `data.notable_facts` (top 3 ranked \
+  radio-interesting facts), `data.air_quality`, `data.location_name`. \
+  Ignore `hourly_forecast` and `day_past` unless surfacing a specific hour matters.
+- **calendar** — `data.api_reachable` (bool), `data.events[]` with \
+  `summary`, `start`, `end`, `duration_min`, `attendee_count`, `is_recurring`, \
+  `has_video_call`, `organizer`.
+- **youtube** / **alices** — `data` is usually `{}`. The hook + rationale \
+  + source_refs are the substrate.
+
+## Hook vs. data layering
+
+For taste agents (`youtube`, `alices`): the hook is the phrasing ceiling. \
+`claim_kind` and `provenance_shape` bound what you may claim; `data` is \
+read-only context for tone calibration only. Do not combine facts from \
+`data` into new temporal or intensity claims the hook did not make.
+
+For context agents (`weather`, `calendar`): `data` is the content source. \
+`hook` is a one-line safety net / summary. Prefer `data` when writing the \
+segment body; use `hook` only as a fallback framing.
+
+`provenance_shape` is already enforced by the agent when writing the hook. \
+You do not need a shape table. Do not invent references to subscriptions, \
+channels, or likes beyond what the hook already cites.
+
+## thin_signal handling
+
+When `thin_signal: true`, write a general-interest segment in the agent's \
+domain — no personalization, no channels/subs/events by name. Optionally \
+close with one factual sentence:
+
+- **youtube** / **alices** — "This will get more personal as your YouTube activity grows." \
+  (cause: sparse subs/likes — not actionable in the short term)
+- **weather** — "Local forecast wasn't available today." (cause: location \
+  skipped at generation, or forecast API failure — both opaque from the script's POV)
+
+Keep the line factual and brief. If awkward, omit it. Never recite reasons \
+across multiple segments — one per thin_signal segment, in that segment's \
+own script.
 
 ## Voice
 
