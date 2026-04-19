@@ -146,3 +146,47 @@ def test_quit_stops_and_returns_immediately(fake_segments, monkeypatch):
 
     assert captured == []
     fake_session.stop.assert_called()
+
+
+def test_repeat_key_emits_replay_and_replays_same_segment(fake_segments, monkeypatch):
+    """REPEAT is the only hotkey where segment index does NOT advance:
+    restart=True + continue → same i re-enters the outer loop.
+    This test pins the control-flow path that diverges from LIKE/SKIP/QUIT.
+    """
+    captured: list[FeedbackSignal] = []
+
+    async def on_fb(sig): captured.append(sig)
+
+    # Track how many times AfplaySession was instantiated — one per segment,
+    # PLUS one more for the repeated segment.
+    session_instances: list[mock.Mock] = []
+
+    def new_session(url):
+        s = mock.Mock()
+        s.is_paused = False
+        session_instances.append(s)
+        return s
+
+    monkeypatch.setattr("player.cli_player.AfplaySession", new_session)
+
+    # Scripted keys: repeat on segment 0 ONCE, then segments 1 and 2 finish naturally.
+    async def fake_key_source():
+        yield KeyPress.REPEAT
+
+    monkeypatch.setattr("player.cli_player._run_key_reader", fake_key_source)
+
+    asyncio.run(play_episode(
+        fake_segments, user_id="dev", episode_id="ep-t", on_feedback=on_fb,
+    ))
+
+    # Exactly one "replay" signal on segment 0 / weather agent.
+    replay_sigs = [s for s in captured if s.signal == "replay"]
+    assert len(replay_sigs) == 1
+    assert replay_sigs[0].agent == "weather"
+    assert replay_sigs[0].segment_index == 0
+
+    # Segment 0 spawned two AfplaySessions (first plays + gets stopped; second
+    # is the restart). Segments 1 and 2 spawn one each. Total = 4.
+    assert len(session_instances) == 4
+    # The first session got stopped (by the REPEAT handler).
+    session_instances[0].stop.assert_called()
