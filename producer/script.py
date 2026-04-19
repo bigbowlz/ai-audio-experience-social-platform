@@ -471,6 +471,21 @@ def _write_cached_artifact(path: Path, segment: SegmentScript, debug: dict) -> N
         raise
 
 
+def _extract_segment_text(response: object) -> str:
+    """Return the final `text` content block's text, after any tool blocks.
+
+    Anthropic returns a heterogeneous content list when tools are used:
+    `server_tool_use`, `web_search_tool_result`, then `text`. We want the last
+    `text` block (the model's final answer). Raises ValueError when no text
+    block is present.
+    """
+    content = getattr(response, "content", None) or []
+    text_blocks = [b for b in content if getattr(b, "type", None) == "text"]
+    if not text_blocks:
+        raise ValueError("LLM returned no text content")
+    return text_blocks[-1].text.strip()
+
+
 async def generate_segment(
     segment: Pitch,
     brief: Brief,
@@ -522,15 +537,14 @@ async def generate_segment(
         timeout=40.0,
     )
 
-    if not response.content or response.content[0].type != "text":
-        raise ValueError("LLM returned no text content")
-    raw = response.content[0].text.strip()
+    raw = _extract_segment_text(response)
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
         if raw.endswith("```"):
             raw = raw[:-3].strip()
 
     data = json.loads(raw)
+    research_outcome = data.get("research_outcome", "story")
 
     seg = SegmentScript(
         agent=data["agent"],

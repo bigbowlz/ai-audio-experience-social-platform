@@ -163,3 +163,83 @@ class TestGenerateSegmentToolPlumbing:
         # But there is NO top-level "query" or "search_seed" field — the LLM derives its own.
         assert "query" not in payload
         assert "search_seed" not in payload
+
+
+def _resp_with_tool_blocks(final_text: str):
+    """Mock a response whose content list has tool blocks BEFORE the final text."""
+    return SimpleNamespace(content=[
+        SimpleNamespace(type="server_tool_use", name="web_search", input={"query": "jazz"}),
+        SimpleNamespace(type="web_search_tool_result", content=[]),
+        SimpleNamespace(type="text", text=final_text),
+    ])
+
+
+def _resp_text_then_more_text(first: str, second: str):
+    """Mock a response with two text blocks. We take the last."""
+    return SimpleNamespace(content=[
+        SimpleNamespace(type="text", text=first),
+        SimpleNamespace(type="text", text=second),
+    ])
+
+
+class TestGenerateSegmentMultiBlockParse:
+    @pytest.mark.asyncio
+    async def test_extracts_final_text_block_after_tool_use(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
+
+        def fake_create(**kwargs):
+            return _resp_with_tool_blocks(_segment_json(pitch_title="yt", script="x" * 50))
+
+        monkeypatch.setattr("producer.script._client.messages.create", fake_create)
+
+        seg = await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
+        assert seg["pitch_title"] == "yt"
+        assert len(seg["script"]) >= 20
+
+    @pytest.mark.asyncio
+    async def test_uses_last_text_block_when_multiple(self, monkeypatch, tmp_path):
+        """If the model emits intermediate commentary text then final JSON, take the last."""
+        monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
+
+        def fake_create(**kwargs):
+            return _resp_text_then_more_text(
+                "Let me search for that.",
+                _segment_json(pitch_title="yt", script="x" * 50),
+            )
+
+        monkeypatch.setattr("producer.script._client.messages.create", fake_create)
+
+        seg = await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
+        assert seg["pitch_title"] == "yt"
+
+    @pytest.mark.asyncio
+    async def test_raises_when_no_text_block(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
+
+        def fake_create(**kwargs):
+            return SimpleNamespace(content=[
+                SimpleNamespace(type="server_tool_use", name="web_search", input={}),
+            ])
+
+        monkeypatch.setattr("producer.script._client.messages.create", fake_create)
+
+        with pytest.raises(ValueError, match="no text content"):
+            await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
+
+    @pytest.mark.asyncio
+    async def test_strips_research_outcome_from_yielded_segment(
+        self, monkeypatch, tmp_path
+    ):
+        """research_outcome is telemetry only — never appears on the returned SegmentScript."""
+        monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
+
+        def fake_create(**kwargs):
+            return _resp_text(_segment_json(
+                pitch_title="yt", script="x" * 50, research_outcome="story",
+            ))
+
+        monkeypatch.setattr("producer.script._client.messages.create", fake_create)
+
+        seg = await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
+        assert "research_outcome" not in seg
+        assert set(seg.keys()) == {"agent", "pitch_title", "segue_in", "script", "estimated_length_sec"}
