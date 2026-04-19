@@ -192,7 +192,7 @@ def oauth_and_capture(
         raise FileNotFoundError(
             f"YouTube OAuth client secrets not found: {creds_file}. "
             "Set YOUTUBE_OAUTH_CLIENT_SECRET or place credentials at "
-            f"{_CREDENTIALS}."
+            f"{creds_file} (default: {_CREDENTIALS})."
         )
     flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), _SCOPES)
     creds = flow.run_local_server(port=0)
