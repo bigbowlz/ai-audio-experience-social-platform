@@ -12,3 +12,7 @@ exports/
 **/calendar_token.json
 **/superpowers/*
 **/credentials.json
+
+# v0 CLI storage (local-filesystem; api-storage deferred to v1)
+/data/
+/exports/
