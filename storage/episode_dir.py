@@ -24,6 +24,11 @@ def episode_dir(episode_id: str) -> Path:
 
     Matches TTSClient's existing default output path layout
     (audio/tts.py:60 → `{output_dir}/{episode_id}/segment_{n}.mp3`).
+
+    Caller must ensure `episode_id` is a bare uuid4 string (no path
+    separators, no `..` segments). This function does not validate the
+    input — path-traversal safety is an implicit contract maintained by
+    the sole caller, `new_episode_id()`.
     """
     d = _EPISODES_DIR / episode_id
     d.mkdir(parents=True, exist_ok=True)
