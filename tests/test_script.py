@@ -16,6 +16,7 @@ from producer.script import (
     EpisodeScript,
     SegmentScript,
     generate_episode_script,
+    split_opener_inputs,
     stream_episode_script,
 )
 
@@ -38,7 +39,6 @@ def _full_pitch(
         "agent": agent,
         "title": title,
         "hook": "you've been getting into jazz lately",
-        "rationale": "Topic 'jazz' scored 0.91 (combined), claim_kind=rising.",
         "source_refs": ["Blue Note Records", "Coltrane Live at Birdland"],
         "data": data if data is not None else {},
         "priority": priority,
@@ -89,13 +89,25 @@ class TestSystemPrompt:
         assert "Prohibited" in SYSTEM_PROMPT
 
     def test_has_field_legend(self):
-        """Every Pitch field name appears in the legend."""
+        """Every payload field appears in the legend.
+
+        rationale, priority, suggested_length_sec, provenance_shape, and
+        target_total_secs were removed from the Step-2 LLM payload
+        (SYSTEM_PROMPT told the LLM to ignore them), so the legend no
+        longer carries them either.
+        """
         for field in (
-            "hook", "rationale", "source_refs", "data",
-            "claim_kind", "provenance_shape", "thin_signal",
-            "priority", "suggested_length_sec",
+            "hook", "source_refs", "data",
+            "claim_kind", "thin_signal",
         ):
             assert field in SYSTEM_PROMPT, f"missing field in legend: {field!r}"
+        for removed in (
+            "rationale", "priority", "suggested_length_sec",
+            "provenance_shape", "target_total_secs",
+        ):
+            assert f"`{removed}`" not in SYSTEM_PROMPT, (
+                f"legend still carries removed field: {removed!r}"
+            )
 
     def test_has_per_agent_data_crib(self):
         """Each agent appears in a data-crib context."""
@@ -116,6 +128,41 @@ class TestSystemPrompt:
         assert "phrasing ceiling" in SYSTEM_PROMPT
         assert "read-only context" in SYSTEM_PROMPT
         assert "content source" in SYSTEM_PROMPT
+
+    def test_has_web_search_usage_block(self):
+        """System prompt instructs the model on web_search tool usage + query rules."""
+        assert "web_search" in SYSTEM_PROMPT
+        # Query-derivation rule: title-only seed, no listener proper nouns.
+        assert "title" in SYSTEM_PROMPT
+        # Must forbid pulling source_refs (listener proper nouns) into the query.
+        assert "source_refs" in SYSTEM_PROMPT
+        # Fallback discipline: broaden once, then hook-narration.
+        assert "broaden" in SYSTEM_PROMPT.lower()
+
+    def test_has_narration_contract_block(self):
+        """Narration contract: segue → story lead → development → takeaway."""
+        prompt_lower = SYSTEM_PROMPT.lower()
+        for beat in ("story lead", "development", "takeaway"):
+            assert beat in prompt_lower, f"missing narration beat: {beat!r}"
+
+    def test_has_source_recitation_rule(self):
+        """Listener proper nouns NOT spoken inside the story body."""
+        prompt_lower = SYSTEM_PROMPT.lower()
+        # Explicit rule forbidding recitation of channel names / video titles / source_refs.
+        assert "recit" in prompt_lower  # matches "recite" / "recitation"
+        assert "source_refs" in SYSTEM_PROMPT
+
+    def test_has_research_outcome_output_field(self):
+        """Output schema carries research_outcome so the fallback path is machine-readable."""
+        assert "research_outcome" in SYSTEM_PROMPT
+        assert '"story"' in SYSTEM_PROMPT
+        assert '"hook_fallback"' in SYSTEM_PROMPT
+
+    def test_forbids_explicit_bridge(self):
+        """Prompt forbids 'because you watched X, here's Y' explicit bridges."""
+        prompt_lower = SYSTEM_PROMPT.lower()
+        # One of these signal phrases must appear in the forbidden-patterns section.
+        assert "explicit bridge" in prompt_lower or "because you watched" in prompt_lower
 
 
 # ── Group C: validation assertions ────────────────────────────────────
@@ -235,3 +282,96 @@ class TestHappyPath:
         assert collected[0]["agent"] == "weather"
         assert collected[1]["agent"] == "youtube"
         assert collected[1]["estimated_length_sec"] == 90
+
+
+# ── Group E: opener-input split ───────────────────────────────────────
+
+
+class TestSplitOpenerInputs:
+    def test_splits_weather_calendar_from_content(self):
+        weather = _full_pitch(agent="weather", title="Weather in SF")
+        calendar = _full_pitch(agent="calendar", title="Today's schedule")
+        youtube = _full_pitch(agent="youtube", title="Jazz")
+        alices = _full_pitch(agent="alices", title="PG essay")
+        w, c, content = split_opener_inputs([weather, calendar, youtube, alices])
+        assert w is weather
+        assert c is calendar
+        assert content == [youtube, alices]
+
+    def test_returns_none_when_opener_input_absent(self):
+        youtube = _full_pitch(agent="youtube", title="Jazz")
+        w, c, content = split_opener_inputs([youtube])
+        assert w is None
+        assert c is None
+        assert content == [youtube]
+
+    def test_preserves_order_within_content(self):
+        alices = _full_pitch(agent="alices", title="PG")
+        youtube = _full_pitch(agent="youtube", title="Jazz")
+        _, _, content = split_opener_inputs([alices, youtube])
+        assert content == [alices, youtube]
+
+    def test_picks_first_when_multiple_weather_or_calendar_pitches(self):
+        """Guaranteed-slots flow emits one per agent; but the split is defensive."""
+        w1 = _full_pitch(agent="weather", title="w1")
+        w2 = _full_pitch(agent="weather", title="w2")
+        youtube = _full_pitch(agent="youtube", title="y")
+        w, c, content = split_opener_inputs([w1, w2, youtube])
+        assert w is w1
+        assert c is None
+        assert content == [youtube]
+
+
+# ── Group F: generate_episode_script end-to-end routing ───────────────
+
+
+class TestGenerateEpisodeScriptRouting:
+    def test_splits_and_calls_opener_then_streams_content(self, monkeypatch):
+        """generate_episode_script fuses weather+calendar into opener; streams the rest."""
+        weather = _full_pitch(agent="weather", title="Weather in SF")
+        calendar = _full_pitch(agent="calendar", title="Today's schedule")
+        youtube = _full_pitch(agent="youtube", title="Jazz")
+        alices = _full_pitch(agent="alices", title="PG essay")
+
+        opener_call = {}
+        stream_call = {}
+
+        async def fake_opener(w, c, first, brief):
+            opener_call["weather"] = w
+            opener_call["calendar"] = c
+            opener_call["first"] = first
+            return "o" * 250
+
+        async def fake_sign_off(brief):
+            return "bye"
+
+        async def fake_generate_segment(segment, brief, is_first):
+            return _seg(agent=segment["agent"], title=segment["title"])
+
+        monkeypatch.setattr("producer.script.generate_opener", fake_opener)
+        monkeypatch.setattr("producer.script.generate_sign_off", fake_sign_off)
+        monkeypatch.setattr("producer.script.generate_segment", fake_generate_segment)
+
+        def capture_stream(selected, brief):
+            stream_call["selected"] = selected
+            return stream_episode_script(selected, brief)
+
+        monkeypatch.setattr("producer.script.stream_episode_script", capture_stream)
+
+        episode = generate_episode_script(
+            [weather, calendar, youtube, alices], _BRIEF
+        )
+
+        assert opener_call["weather"] is weather
+        assert opener_call["calendar"] is calendar
+        assert opener_call["first"] is youtube
+        assert stream_call["selected"] == [youtube, alices]
+        assert episode["opener"] == "o" * 250
+        assert episode["sign_off"] == "bye"
+        assert [s["agent"] for s in episode["segments"]] == ["youtube", "alices"]
+
+    def test_raises_when_no_content_pitches(self, monkeypatch):
+        weather = _full_pitch(agent="weather", title="w")
+        calendar = _full_pitch(agent="calendar", title="c")
+        with pytest.raises(ValueError, match="no content pitches"):
+            generate_episode_script([weather, calendar], _BRIEF)
