@@ -79,3 +79,104 @@ class TestSegmentCachePath:
         monkeypatch.delenv("RADIO_CACHE_DIR", raising=False)
         got = _segment_cache_path("youtube", "x", "2026-04-18", 130)
         assert got == Path("tmp/segment_script_cache/segment_scripts/youtube_x_20260418_130.json")
+
+
+from producer.script import (
+    SegmentScript,
+    _read_cached_segment,
+    _write_cached_artifact,
+)
+
+
+def _artifact_dict(**segment_overrides) -> dict:
+    seg = {
+        "agent": "youtube",
+        "pitch_title": "Jazz Exploration",
+        "segue_in": "And next —",
+        "script": "This is a sufficiently long script body to pass the floor.",
+        "estimated_length_sec": 60,
+    }
+    seg.update(segment_overrides)
+    return {
+        "segment": seg,
+        "debug": {
+            "search_query": "jazz",
+            "search_used": True,
+            "broadened": False,
+            "research_outcome": "story",
+            "raw_llm_text": "...",
+            "input_pitch": {"title": "Jazz Exploration", "hook": "h",
+                            "source_refs": [], "claim_kind": "neutral"},
+            "target_words": 130,
+            "words_per_minute": 130,
+        },
+    }
+
+
+class TestWriteCachedArtifact:
+    def test_writes_pretty_json(self, tmp_path: Path):
+        path = tmp_path / "seg.json"
+        art = _artifact_dict()
+        _write_cached_artifact(path, art["segment"], art["debug"])
+        raw = path.read_text(encoding="utf-8")
+        # Pretty-printed → at least one indented line
+        assert "\n  " in raw
+        loaded = json.loads(raw)
+        assert loaded["segment"]["agent"] == "youtube"
+        assert loaded["debug"]["search_query"] == "jazz"
+
+    def test_creates_parent_dirs(self, tmp_path: Path):
+        path = tmp_path / "does" / "not" / "exist" / "seg.json"
+        art = _artifact_dict()
+        _write_cached_artifact(path, art["segment"], art["debug"])
+        assert path.exists()
+
+    def test_atomic_no_partial_file_on_failure(self, tmp_path: Path, monkeypatch):
+        """If os.replace raises, the final path must not exist."""
+        path = tmp_path / "seg.json"
+
+        def boom(src, dst):
+            raise OSError("simulated rename failure")
+
+        monkeypatch.setattr("os.replace", boom)
+
+        with pytest.raises(OSError):
+            art = _artifact_dict()
+            _write_cached_artifact(path, art["segment"], art["debug"])
+        assert not path.exists()
+        # No leftover *.tmp either
+        leftovers = list(tmp_path.glob("*.tmp"))
+        assert leftovers == []
+
+
+class TestReadCachedSegment:
+    def test_returns_segment_on_hit(self, tmp_path: Path):
+        path = tmp_path / "seg.json"
+        art = _artifact_dict()
+        path.write_text(json.dumps(art), encoding="utf-8")
+        got = _read_cached_segment(path)
+        assert got is not None
+        assert got["agent"] == "youtube"
+        assert got["pitch_title"] == "Jazz Exploration"
+        assert got["script"].startswith("This is a sufficiently long")
+
+    def test_returns_none_when_missing(self, tmp_path: Path):
+        assert _read_cached_segment(tmp_path / "nope.json") is None
+
+    def test_soft_fails_on_malformed_json(self, tmp_path: Path, capsys):
+        path = tmp_path / "seg.json"
+        path.write_text("not json at all {{{", encoding="utf-8")
+        # Must NOT raise — soft-fail, log, return None (spec §3: cache is advisory).
+        assert _read_cached_segment(path) is None
+
+    def test_soft_fails_on_missing_segment_key(self, tmp_path: Path):
+        path = tmp_path / "seg.json"
+        path.write_text(json.dumps({"debug": {}}), encoding="utf-8")
+        assert _read_cached_segment(path) is None
+
+    def test_soft_fails_on_missing_required_segment_field(self, tmp_path: Path):
+        art = _artifact_dict()
+        del art["segment"]["script"]
+        path = tmp_path / "seg.json"
+        path.write_text(json.dumps(art), encoding="utf-8")
+        assert _read_cached_segment(path) is None

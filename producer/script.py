@@ -339,6 +339,62 @@ def _segment_cache_path(agent: str, title: str, date: str, wpm: int) -> Path:
     return cache_dir() / "segment_scripts" / f"{agent}_{slug}_{date_compact}_{wpm}.json"
 
 
+_SEGMENT_REQUIRED_KEYS = {"agent", "pitch_title", "segue_in", "script", "estimated_length_sec"}
+
+
+def _read_cached_segment(path: Path) -> SegmentScript | None:
+    """Return `artifact["segment"]` on hit, or None on any parse/IO failure.
+
+    Soft-fail contract (spec §3): a corrupted or malformed cache file is logged
+    and treated as a miss. Missing required keys → miss. The aim is honest
+    degradation — an unreadable cache never blocks generation.
+    """
+    if not path.exists():
+        return None
+    try:
+        raw = path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        segment = data["segment"]
+        missing = _SEGMENT_REQUIRED_KEYS - set(segment)
+        if missing:
+            raise KeyError(f"missing segment keys: {sorted(missing)}")
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        print(
+            f"[producer.script] cache read failed for {path}: {exc!r} — treating as miss",
+            file=sys.stderr,
+        )
+        return None
+    return SegmentScript(
+        agent=segment["agent"],
+        pitch_title=segment["pitch_title"],
+        segue_in=segment["segue_in"],
+        script=segment["script"],
+        estimated_length_sec=segment["estimated_length_sec"],
+    )
+
+
+def _write_cached_artifact(path: Path, segment: SegmentScript, debug: dict) -> None:
+    """Atomically write `{segment, debug}` as pretty-printed JSON.
+
+    Writes to `<path>.tmp` in the same directory, then `os.replace()` onto the
+    final path so readers never see a partial file. Parent directories are
+    created on demand. Cleans up the tmp file on any write failure.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    payload = {"segment": dict(segment), "debug": debug}
+    try:
+        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        raise
+
+
 async def generate_segment(
     segment: Pitch,
     brief: Brief,
