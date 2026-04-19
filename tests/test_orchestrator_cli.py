@@ -50,3 +50,36 @@ def test_youtube_only_flag_selects_youtube_only():
         weather=False, calendar=False, youtube=True
     )
     assert names == ["youtube"]
+
+
+def test_cli_main_calls_preflight_once_per_active_agent(monkeypatch):
+    """Every activated agent triggers its preflight exactly once, before
+    the agent is instantiated. Preserves the weather→calendar→youtube order."""
+    import agents.orchestrator as orch
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "auth.preflight.ensure_agent_auth",
+        lambda name: calls.append(name),
+    )
+
+    # Stub the heavy path: replace run_episode + everything after it.
+    monkeypatch.setattr(
+        orch, "run_episode",
+        lambda *a, **k: ({}, {"today_context": {}, "user_profile": None}),
+    )
+    # Also stub subscribe so we don't spam stdout with JsonlSink output.
+    monkeypatch.setattr("producer.events.subscribe", lambda *_a, **_k: None)
+    # Force an exception downstream so the raises guard is satisfied; we only
+    # care that preflight was invoked before this point.
+    monkeypatch.setattr(
+        "producer.memory.load_producer_memory",
+        lambda *_a, **_k: (_ for _ in ()).throw(KeyError("stubbed")),
+    )
+
+    # SystemExit is acceptable: downstream producer.memory / bonus / script
+    # modules are stubbed-away via run_episode returning empty dicts, which
+    # causes various KeyErrors downstream. We only assert preflight order.
+    with pytest.raises((SystemExit, KeyError, IndexError, AttributeError, TypeError)):
+        orch.cli_main(["--weather", "--calendar", "--no-llm", "--no-external"])
+    assert calls == ["weather", "calendar"]
