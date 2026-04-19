@@ -14,15 +14,20 @@ from typing import NotRequired, TypedDict, Protocol, runtime_checkable
 
 # ── Today's context (assembled by orchestrator from weather + calendar) ──
 
-class TodayContext(TypedDict):
-    date: str                           # ISO 8601 date, e.g. "2026-04-16"
-    day_of_week: str                    # "Monday" … "Sunday"
-    time_of_day: str                    # "morning" | "afternoon" | "evening" | "night"
-    weather_summary: str | None         # "rainy, 14°C" — None if weather fetch failed
-    calendar_events: list[str] | None   # ["Team standup 10am"] — None if no calendar agent
+
+class TodayContext(TypedDict, total=False):
+    date: str  # ISO 8601 date, e.g. "2026-04-16"
+    day_of_week: str  # "Monday" … "Sunday"
+    time_of_day: str  # "morning" | "afternoon" | "evening" | "night"
+    now: str  # 24-hour local time only, HH:MM:SS — date already carried by `date` field
+    weather_summary: str | None  # "rainy, 14°C" — None if weather fetch failed
+    calendar_events: (
+        list[str] | None
+    )  # ["Team standup 10am"] — None if no calendar agent
 
 
 # ── UserProfile: identity fields (separate from TodayContext, which is "what's true today") ──
+
 
 class UserProfile(TypedDict, total=False):
     """Per-user identity fields the Producer may use in spoken script.
@@ -32,15 +37,19 @@ class UserProfile(TypedDict, total=False):
     and cached at ~/.config/radio-podcast/user_profile.json. Absent for
     any user who has not completed auth.
     """
-    first_name: str     # "Alice" — preferred salutation in cold open
-    display_name: str   # "Alice Guesto" — full name; v0 informational only
+
+    first_name: str  # "Alice" — preferred salutation in cold open
+    display_name: str  # "Alice Guesto" — full name; v0 informational only
 
 
 # ── Brief: per-episode context object, same for all agents ──
 
+
 class Brief(TypedDict):
     today_context: TodayContext
-    user_profile: NotRequired[UserProfile | None]  # absent or None = address user as "you"
+    user_profile: NotRequired[
+        UserProfile | None
+    ]  # absent or None = address user as "you"
 
 
 # ── ScopeContext: base shape; each agent extends it with its own fields ──
@@ -49,26 +58,30 @@ class Brief(TypedDict):
 #   weather_agent  → {"weather_summary": str}
 #   calendar_agent → {"calendar_events": list[str]}
 
+
 class ScopeContext(TypedDict, total=False):
     """Base shape. Agents add their own fields."""
+
     pass
 
 
 # ── Pitch: what an agent emits ──
 
+
 class Pitch(TypedDict, total=False):
-    agent: str                  # "youtube" | "calendar" | "weather" | "alices"
+    agent: str  # "youtube" | "calendar" | "weather" | "alices"
     title: str
-    hook: str                   # creative brief for Producer — not spoken verbatim
-    data: dict                  # structured payload; agent-specific (e.g. calendar events)
-    source_refs: list[str]      # channel_ids / video_ids / etc.
-    priority: float             # [0, 1]; higher = more important
-    thin_signal: bool           # True iff exactly 1 pitch due to insufficient data
-    claim_kind: str             # "durable" | "rising" | "discovery" | "neutral"
-    provenance_shape: str       # "balanced" | "sub_only" | "like_only"
+    hook: str  # creative brief for Producer — not spoken verbatim
+    data: dict  # structured payload; agent-specific (e.g. calendar events)
+    source_refs: list[str]  # channel_ids / video_ids / etc.
+    priority: float  # [0, 1]; higher = more important
+    thin_signal: bool  # True iff exactly 1 pitch due to insufficient data
+    claim_kind: str  # "durable" | "rising" | "discovery" | "neutral"
+    provenance_shape: str  # "balanced" | "sub_only" | "like_only"
 
 
 # ── RunningOrder: Producer's selected segments + episode-level metadata ──
+
 
 class RunningOrder(TypedDict):
     """Producer's output of select_guaranteed_slots + select_bonus_segments_llm.
@@ -77,41 +90,47 @@ class RunningOrder(TypedDict):
     The same Pitch objects appear under `segments`; the wrapper carries
     episode-level metadata that today's tuple returns smuggle separately.
     """
-    segments: list[Pitch]              # ordered: guaranteed first, then bonus
-    total_sec: int                     # sum of suggested_length_sec for all segments
-    guaranteed_count: int              # how many of `segments` are guaranteed
-    bonus_count: int                   # len(segments) - guaranteed_count
+
+    segments: list[Pitch]  # ordered: guaranteed first, then bonus
+    total_sec: int  # sum of suggested_length_sec for all segments
+    guaranteed_count: int  # how many of `segments` are guaranteed
+    bonus_count: int  # len(segments) - guaranteed_count
 
 
 # ── ExternalDecision: Producer's call on whether to invoke an external agent ──
 
+
 class ExternalDecision(TypedDict):
     """Result of producer.external.decide_external_invocation()."""
-    decision: str                      # "invoke" | "skip"; v0 always "invoke"
-    rationale: str                     # human-readable; surfaced in SSE event payload
+
+    decision: str  # "invoke" | "skip"; v0 always "invoke"
+    rationale: str  # human-readable; surfaced in SSE event payload
 
 
 # ── CreatorAgentListing: marketplace entry for an external agent ──
+
 
 class CreatorAgentListing(TypedDict):
     """Result of producer.external.query_marketplace().
 
     v0 reads a hardcoded list. v1 queries a real marketplace.
     """
-    handle: str                        # "@AlicesLens"
-    display_name: str                  # "Alice's Lens"
-    scope: str                         # human-readable scope description
-    price_usdc: float                  # demo: 0.10
-    wallet_address: str                # Base Sepolia address
+
+    handle: str  # "@GoddamnAxl"
+    display_name: str  # "Alice's Lens"
+    scope: str  # human-readable scope description
+    price_usdc: float  # demo: 0.10
+    wallet_address: str  # Base Sepolia address
 
 
 # ── AgentMemory: persisted per-(user, agent) state ──
 
+
 class AgentMemory(TypedDict):
-    schema_version: int             # = 1 for v0
-    profile_state: dict             # InterestProfile; owned by agents/youtube
+    schema_version: int  # = 1 for v0
+    profile_state: dict  # InterestProfile; owned by agents/youtube
     topic_multiplier: dict[str, float]  # owned by learning-loop
-    updated_at: str                 # ISO 8601; bumped on any field write
+    updated_at: str  # ISO 8601; bumped on any field write
 
 
 def bootstrap_memory() -> AgentMemory:
@@ -145,13 +164,14 @@ def bootstrap_memory() -> AgentMemory:
 
 # ── DataAgent protocol ──
 
+
 @runtime_checkable
 class DataAgent(Protocol):
-    name: str           # "youtube" | "calendar" | "weather" | "alices"
-    display_name: str   # "@YouTube" | "@AlicesLens"
-    scope: str          # human-readable scope description
-    external: bool      # True for creator agents only
-    price_usdc: float | None    # None for internal agents
+    name: str  # "youtube" | "calendar" | "weather" | "alices"
+    display_name: str  # "@YouTube" | "@GoddamnAxl"
+    scope: str  # human-readable scope description
+    external: bool  # True for creator agents only
+    price_usdc: float | None  # None for internal agents
     wallet_address: str | None  # None for internal agents
 
     def load_memory(self, user_id: str) -> AgentMemory:
