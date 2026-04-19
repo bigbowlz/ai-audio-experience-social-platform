@@ -39,6 +39,7 @@ fetch_context(user_id)
             "end": "10:30",
             "duration_min": 30,
             "attendee_count": 5,
+            "attendees": ["Alex Chen", "Bo Liu"],
             "is_recurring": true,
             "has_video_call": true,
             "organizer": "Alex Chen"
@@ -62,12 +63,24 @@ Structured WHAT / SOURCE / GOAL, never spoken verbatim. Branches on
 `api_reachable` and event count:
 
 ```
-WHAT: Schedule segment — {n} upcoming event(s) in the next 16 hours.
+WHAT: Schedule preview — {n} event(s) in the rolling 16h window from
+      {now_iso} to {window_end_iso}. This is a horizon view, not the
+      full day.
 SOURCE: Google Calendar (live OAuth, listener's primary calendar).
-GOAL: Orient the listener to today's shape before taste segments. Use
-      data.events as the content source; pick the single most narratively
-      useful event to reference.
+GOAL: Orient the listener to the shape of the window before taste
+      segments. Use data.events as the content source; pick the single
+      most narratively useful event to reference. Describe only what's
+      in the window — do not characterize hours beyond the window end.
 ```
+
+The window timestamps are baked into the hook so downstream prompts
+(opener + segment paths) read the same fact verbatim. The
+OPENER_SYSTEM_PROMPT has an explicit `## Calendar window awareness`
+block teaching the LLM to reason from `today_context.now` — see
+[docs/specs/2026-04-19-prompt-and-cli-polish.md §N1](../../../docs/specs/2026-04-19-prompt-and-cli-polish.md#n1--calendar-16-hour-window-awareness).
+
+Zero-event variant reads: "Schedule preview — 0 events in the {window}.
+This is a horizon view, not the full day."
 
 No `rationale` field — agents stopped emitting it (it was write-only
 across the codebase). See `agents/calendar/agent.py` for degraded and
@@ -82,6 +95,7 @@ zero-event variants.
 | `_list_events()` wrapper | Thin function around Google API chain | Clean mock boundary for tests. One function to mock instead of `discovery.build().events().list().execute()`. |
 | Per-event try/except | Skip malformed RFC3339 datetimes | One bad event shouldn't crash the entire agent. Log warning, keep going. |
 | `calendar_events_rich` in ScopeContext | Agent-internal field alongside `calendar_events` | Orchestrator reads flat strings for Brief. pitch() forwards rich dicts to Producer via `Pitch.data`. |
+| Attendee names, not emails | `attendees` carries `displayName` values only; entries without a `displayName` are dropped | Producer needs human-readable names to narrate ("your 1:1 with Alex"). Emails are PII the Producer has no use for. `attendee_count` keeps the full total so the Producer still sees "5 people" even when only 2 have resolvable names. |
 
 ### Data flow through the system
 
@@ -178,7 +192,6 @@ Priority is scheduling metadata, not taste. It scales with event count so the Pr
 ## Open questions
 
 1. **Tomorrow preview:** Fetch tomorrow's first event for "heads up, early start" hooks. Deferred to v1.
-2. **Attendee privacy:** Names go into template hooks. Fine for demo, needs privacy policy for production.
 
 ## Deferred to v1
 
