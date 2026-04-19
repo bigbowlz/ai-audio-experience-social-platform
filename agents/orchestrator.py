@@ -291,6 +291,13 @@ def cli_main(argv: list[str] | None = None) -> int:
     for name in agent_names:
         ensure_agent_auth(name)
 
+    from learning_loop.seed_from_feedback import hydrate_producer_memory
+    hydrated_weights = hydrate_producer_memory(args.user_id)
+    if hydrated_weights:
+        print(f"[learning] hydrated ProducerMemory from feedback log — agent_weights:")
+        for agent, w in sorted(hydrated_weights.items()):
+            print(f"  {agent:<10} {w:.3f}")
+
     from agents.calendar.agent import CalendarAgent
     from agents.weather.agent import WeatherAgent
     from agents.youtube.agent import YouTubeAgent
@@ -411,23 +418,61 @@ def cli_main(argv: list[str] | None = None) -> int:
         print(json.dumps(selected, indent=2))
     elif os.environ.get("ELEVENLABS_API_KEY"):
         import asyncio
-        import time
         from pipeline import run_episode_pipeline
+        from storage.episode_dir import new_episode_id
 
         print("[orchestrator] Running full pipeline (script + audio) …\n")
         try:
-            episode_id = f"ep-{int(time.time())}"
+            episode_id = new_episode_id()
+            print(f"[orchestrator] episode_id = {episode_id}")
+
             result = asyncio.run(run_episode_pipeline(selected, brief, episode_id))
             print(f"── Opener ──\n{result.opener}\n")
-            for seg_result in result.audio.segment_results:
-                print(
-                    f"  [segment {seg_result['segment_index']}] "
-                    f"{seg_result['url']} ({seg_result['duration_ms']}ms)"
-                )
+
             if result.audio.episode_failed is not None:
                 print(f"\n[audio] episode failed: {result.audio.episode_failed.reason}")
             if result.audio.skipped_segments:
                 print(f"\n[audio] skipped segments: {result.audio.skipped_segments}")
+
+            # Build the segment view the player expects. Pull pitch_title from
+            # `selected` (the producer-selected pitches, same order as audio segments).
+            player_segments = [
+                {
+                    "segment_index": seg_result["segment_index"],
+                    "agent": selected[seg_result["segment_index"]]["agent"],
+                    "pitch_title": selected[seg_result["segment_index"]]["title"],
+                    "url": seg_result["url"],
+                }
+                for seg_result in result.audio.segment_results
+            ]
+
+            # Feedback sink: append to per-episode JSONL under ./data/signals/{user}/.
+            from dataclasses import asdict
+            from player.cli_player import FeedbackSignal, play_episode
+            from storage.signals import append_signal
+
+            async def _on_feedback(sig: FeedbackSignal) -> None:
+                append_signal(args.user_id, episode_id, asdict(sig))
+
+            print("\n── Playback ── (l=like  s=skip  r=repeat  p=pause  q=quit) ──")
+            asyncio.run(play_episode(
+                segments=player_segments,
+                user_id=args.user_id,
+                episode_id=episode_id,
+                on_feedback=_on_feedback,
+            ))
+
+            # Auto-export concat MP3 unless --no-export.
+            if not args.no_export:
+                from storage.export import concat_episode_mp3
+                try:
+                    out = concat_episode_mp3(episode_id)
+                    print(f"\n[export] judge-handoff MP3 → {out}")
+                except RuntimeError as e:
+                    print(f"\n[export] failed: {e}")
+                    print(f"[export] individual segments still available under "
+                          f"./data/episodes/{episode_id}/")
+
             print(f"\n── Sign-off ──\n{result.sign_off}\n")
         except Exception as e:
             print(f"[orchestrator] Pipeline failed: {e}")
@@ -444,6 +489,22 @@ def cli_main(argv: list[str] | None = None) -> int:
             print(f"[orchestrator] Producer LLM failed: {e}")
             print("[orchestrator] Falling back to raw segment JSON.")
             print(json.dumps(selected, indent=2))
+
+    # End-of-run learning preview: summarize what the newly-appended signals
+    # would yield on the NEXT run. Visible-to-demonstrator so they can narrate
+    # "watch how episode 2 re-orders the lineup."
+    print("\n── Learning signals logged — next run will re-seed ProducerMemory ──")
+    from learning_loop.seed_from_feedback import compute_weights
+    from storage.signals import iter_signals
+    post_run_weights = compute_weights(list(iter_signals(args.user_id)))
+    if post_run_weights:
+        print(f"[learning] next-run agent_weights:")
+        for agent, w in sorted(post_run_weights.items()):
+            prev = hydrated_weights.get(agent, 1.0)
+            arrow = "↑" if w > prev else ("↓" if w < prev else "·")
+            print(f"  {agent:<10} {prev:.3f} → {w:.3f}  {arrow}")
+    else:
+        print("[learning] no learning signals captured this episode.")
 
     return 0
 
