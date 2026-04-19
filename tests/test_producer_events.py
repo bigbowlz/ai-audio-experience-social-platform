@@ -13,6 +13,7 @@ import pytest
 from producer.events import (
     EventBus,
     JsonlSink,
+    PrettySink,
     emit,
     set_default_bus,
     subscribe,
@@ -57,6 +58,38 @@ def test_jsonl_sink_writes_one_line_per_event():
     assert len(lines) == 2
     assert json.loads(lines[0]) == {"event": "producer.test", "payload": {"k": 1}}
     assert json.loads(lines[1]) == {"event": "producer.test", "payload": {"k": 2}}
+
+
+def test_pretty_sink_renders_nested_payload_as_tree():
+    buf = io.StringIO()
+    sink = PrettySink(buf)
+    sink("producer.marketplace.queried", {
+        "candidates": [
+            {"handle": "alices", "price_usdc": 0.1, "free_tier": True},
+            {"handle": "alex", "price_usdc": 0.0, "free_tier": False},
+        ],
+        "reasoning_summary": "2 candidates available",
+        "empty_obj": {},
+        "missing": None,
+    })
+    out = buf.getvalue()
+    assert out.startswith("▸ producer.marketplace.queried\n")
+    assert "  candidates:\n" in out
+    assert "    [0]:\n" in out
+    assert "      handle: alices" in out
+    assert "      price_usdc: 0.1" in out
+    assert "      free_tier: true" in out
+    assert "      free_tier: false" in out
+    assert "  reasoning_summary: 2 candidates available" in out
+    assert "  empty_obj: {}" in out
+    assert "  missing: null" in out
+
+
+def test_pretty_sink_handles_flat_payload():
+    buf = io.StringIO()
+    sink = PrettySink(buf)
+    sink("agent.pitching.started", {"phase": "internal"})
+    assert buf.getvalue() == "▸ agent.pitching.started\n  phase: internal\n"
 
 
 def test_module_level_emit_routes_to_default_bus():

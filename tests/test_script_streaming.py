@@ -101,15 +101,25 @@ def _segment_json(
     segue_in: str = "",
     script: str = "x" * 50,
     estimated_length_sec: int = 60,
-    research_outcome: str = "story",
 ) -> str:
     import json
     return json.dumps({
         "agent": agent, "pitch_title": pitch_title,
         "segue_in": segue_in, "script": script,
         "estimated_length_sec": estimated_length_sec,
-        "research_outcome": research_outcome,
     })
+
+
+def _resp_with_search_then_text(final_text: str, query: str = "jazz"):
+    """Mock a response where the model actually used web_search once."""
+    return SimpleNamespace(content=[
+        SimpleNamespace(
+            type="server_tool_use", name="web_search",
+            input={"query": query},
+        ),
+        SimpleNamespace(type="web_search_tool_result", content=[]),
+        SimpleNamespace(type="text", text=final_text),
+    ])
 
 
 class TestGenerateSegmentToolPlumbing:
@@ -227,21 +237,31 @@ class TestGenerateSegmentMultiBlockParse:
             await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
 
     @pytest.mark.asyncio
-    async def test_strips_research_outcome_from_yielded_segment(
+    async def test_yielded_segment_has_only_canonical_keys(
         self, monkeypatch, tmp_path
     ):
-        """research_outcome is telemetry only — never appears on the returned SegmentScript."""
+        """Returned SegmentScript must carry exactly the 5 canonical keys.
+
+        Any extra fields the model tries to emit (old research_outcome,
+        future experimental fields, etc.) must not leak through to the
+        caller — Producer owns its schema.
+        """
+        import json as _json
         monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
 
         def fake_create(**kwargs):
-            return _resp_text(_segment_json(
-                pitch_title="yt", script="x" * 50, research_outcome="story",
-            ))
+            # Emit JSON with an extra unknown field — should be silently dropped.
+            extra = _json.dumps({
+                "agent": "youtube", "pitch_title": "yt",
+                "segue_in": "", "script": "x" * 50,
+                "estimated_length_sec": 60,
+                "unexpected_field": "leak",
+            })
+            return _resp_text(extra)
 
         monkeypatch.setattr("producer.script._client.messages.create", fake_create)
 
         seg = await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
-        assert "research_outcome" not in seg
         assert set(seg.keys()) == {"agent", "pitch_title", "segue_in", "script", "estimated_length_sec"}
 
 
@@ -249,8 +269,17 @@ from producer.events import EventBus, set_default_bus
 
 
 class TestResearchFallbackTelemetry:
+    """research_fallback now fires on OBSERVED behavior, not LLM self-report.
+
+    Signal: `producer.segment.research_fallback` emits iff the primary
+    response contained zero `server_tool_use` blocks for `web_search`.
+    Replaces the prior contract where the LLM had to declare
+    `research_outcome: "hook_fallback"` in its JSON output.
+    """
+
     @pytest.mark.asyncio
-    async def test_hook_fallback_emits_event(self, monkeypatch, tmp_path):
+    async def test_no_search_emits_event(self, monkeypatch, tmp_path):
+        """Response with no server_tool_use block → research_fallback fires."""
         monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
         bus = EventBus()
         captured: list[tuple[str, dict]] = []
@@ -258,10 +287,8 @@ class TestResearchFallbackTelemetry:
         set_default_bus(bus)
         try:
             def fake_create(**kwargs):
-                return _resp_text(_segment_json(
-                    pitch_title="yt", script="x" * 50,
-                    research_outcome="hook_fallback",
-                ))
+                # Text block only — no server_tool_use.
+                return _resp_text(_segment_json(pitch_title="yt", script="x" * 50))
 
             monkeypatch.setattr("producer.script._client.messages.create", fake_create)
             await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
@@ -271,13 +298,14 @@ class TestResearchFallbackTelemetry:
         events = [(n, p) for n, p in captured
                   if n == "producer.segment.research_fallback"]
         assert len(events) == 1
-        name, payload = events[0]
+        _, payload = events[0]
         assert payload["agent"] == "youtube"
         assert payload["pitch_title"] == "yt"
-        assert "reason" in payload  # "empty_search" | "broadened_empty"
+        assert payload["reason"] == "no_search"
 
     @pytest.mark.asyncio
-    async def test_story_outcome_does_not_emit_event(self, monkeypatch, tmp_path):
+    async def test_with_search_does_not_emit_event(self, monkeypatch, tmp_path):
+        """Response containing a web_search server_tool_use block → no event."""
         monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
         bus = EventBus()
         captured: list[tuple[str, dict]] = []
@@ -285,9 +313,10 @@ class TestResearchFallbackTelemetry:
         set_default_bus(bus)
         try:
             def fake_create(**kwargs):
-                return _resp_text(_segment_json(
-                    pitch_title="yt", script="x" * 50, research_outcome="story",
-                ))
+                return _resp_with_search_then_text(
+                    _segment_json(pitch_title="yt", script="x" * 50),
+                    query="jazz",
+                )
             monkeypatch.setattr("producer.script._client.messages.create", fake_create)
             await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
         finally:
@@ -297,17 +326,16 @@ class TestResearchFallbackTelemetry:
         assert events == []
 
     @pytest.mark.asyncio
-    async def test_hook_fallback_still_enforces_min_script_floor(
+    async def test_script_floor_enforced_regardless_of_search(
         self, monkeypatch, tmp_path
     ):
-        """Spec invariant: _MIN_SCRIPT_CHARS (20) still applies to hook-fallback output."""
+        """_MIN_SCRIPT_CHARS (20) applies whether or not the model searched."""
         monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
 
         def fake_create(**kwargs):
             return _resp_text(_segment_json(
                 pitch_title="yt",
                 script="too short.",  # 10 chars
-                research_outcome="hook_fallback",
             ))
 
         monkeypatch.setattr("producer.script._client.messages.create", fake_create)
@@ -347,7 +375,10 @@ class TestSegmentCacheIntegration:
         art = _json.loads(expected.read_text(encoding="utf-8"))
         assert set(art.keys()) == {"segment", "debug"}
         assert art["segment"]["pitch_title"] == "Jazz"
-        assert "research_outcome" in art["debug"]
+        # Observed behavior — not LLM self-report. This mock returns 0 tool uses.
+        assert art["debug"]["search_tool_calls"] == 0
+        assert art["debug"]["search_queries"] == []
+        assert art["debug"]["fallback_path"] is None
         assert "raw_llm_text" in art["debug"]
         assert "input_pitch" in art["debug"]
         assert art["debug"]["target_words"] == _target_words_helper(pitch["suggested_length_sec"])

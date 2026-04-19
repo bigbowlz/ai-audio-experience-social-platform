@@ -100,10 +100,9 @@ def _artifact_dict(**segment_overrides) -> dict:
     return {
         "segment": seg,
         "debug": {
-            "search_query": "jazz",
-            "search_used": True,
-            "broadened": False,
-            "research_outcome": "story",
+            "search_tool_calls": 1,
+            "search_queries": ["jazz"],
+            "fallback_path": None,
             "raw_llm_text": "...",
             "input_pitch": {"title": "Jazz Exploration", "hook": "h",
                             "source_refs": [], "claim_kind": "neutral"},
@@ -123,7 +122,8 @@ class TestWriteCachedArtifact:
         assert "\n  " in raw
         loaded = json.loads(raw)
         assert loaded["segment"]["agent"] == "youtube"
-        assert loaded["debug"]["search_query"] == "jazz"
+        assert loaded["debug"]["search_queries"] == ["jazz"]
+        assert loaded["debug"]["search_tool_calls"] == 1
 
     def test_creates_parent_dirs(self, tmp_path: Path):
         path = tmp_path / "does" / "not" / "exist" / "seg.json"

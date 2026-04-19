@@ -791,6 +791,41 @@ class TestFetchContext:
 
         assert ctx["weather_summary"] is None
 
+    def test_forecast_transient_failure_retries_and_succeeds(self):
+        """Regression: first forecast call fails, retry succeeds, summary populated."""
+        from unittest.mock import patch, MagicMock
+        import httpx
+        from agents.weather.agent import WeatherAgent
+
+        agent = WeatherAgent()
+
+        forecast_call_count = {"n": 0}
+
+        def flaky_get(url, params=None):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            if "air-quality" in url:
+                resp.json.return_value = AIR_QUALITY_RESPONSE
+                return resp
+            forecast_call_count["n"] += 1
+            if forecast_call_count["n"] == 1:
+                raise httpx.HTTPError("transient forecast error")
+            resp.json.return_value = FORECAST_RESPONSE
+            return resp
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get = MagicMock(side_effect=flaky_get)
+
+        with patch("agents.weather.agent.httpx.Client", return_value=mock_client):
+            with patch("agents.weather.agent._get_user_location",
+                       return_value=(37.7749, -122.4194, "San Francisco, CA")):
+                ctx = agent.fetch_context("user1")
+
+        assert forecast_call_count["n"] == 2  # one failure, one retry
+        assert ctx["weather_summary"] is not None
+
     def test_aq_failure_still_succeeds(self):
         """AQ failure is non-fatal; forecast data still returned."""
         from unittest.mock import patch, MagicMock

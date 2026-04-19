@@ -15,10 +15,44 @@ from producer.script import (
     SYSTEM_PROMPT,
     EpisodeScript,
     SegmentScript,
+    _strip_inline_markup,
     generate_episode_script,
     split_opener_inputs,
     stream_episode_script,
 )
+
+
+# ── Inline-markup stripping ──────────────────────────────────────────
+
+
+class TestStripInlineMarkup:
+    def test_strips_single_cite_tag_preserves_content(self):
+        raw = 'Earlier this year, <cite index="7-21">Zhu took first prize</cite>.'
+        assert _strip_inline_markup(raw) == "Earlier this year, Zhu took first prize."
+
+    def test_strips_multiple_cite_tags_multi_index(self):
+        raw = (
+            '<cite index="4-1,4-2">Lim\'s Goldberg recording</cite> has dominated '
+            'charts <cite index="2-5">worldwide</cite>.'
+        )
+        assert _strip_inline_markup(raw) == (
+            "Lim's Goldberg recording has dominated charts worldwide."
+        )
+
+    def test_strips_br_tags(self):
+        assert _strip_inline_markup("line one<br><br>line two") == "line one line two"
+        assert _strip_inline_markup("a<br/>b<br />c") == "a b c"
+
+    def test_cite_tag_spanning_newlines(self):
+        raw = '<cite index="3-1">first line\nsecond line</cite> tail'
+        assert _strip_inline_markup(raw) == "first line\nsecond line tail"
+
+    def test_plain_text_unchanged(self):
+        assert _strip_inline_markup("plain spoken words") == "plain spoken words"
+
+    def test_collapses_double_spaces_from_removal(self):
+        raw = "<cite>foo</cite>  bar"
+        assert "  " not in _strip_inline_markup(raw)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────
@@ -140,9 +174,9 @@ class TestSystemPrompt:
         assert "broaden" in SYSTEM_PROMPT.lower()
 
     def test_has_narration_contract_block(self):
-        """Narration contract: segue → story lead → development → takeaway."""
+        """Narration contract beats: lead → factual body → flex band → takeaway."""
         prompt_lower = SYSTEM_PROMPT.lower()
-        for beat in ("story lead", "development", "takeaway"):
+        for beat in ("lead", "factual body", "flex band", "takeaway"):
             assert beat in prompt_lower, f"missing narration beat: {beat!r}"
 
     def test_has_source_recitation_rule(self):
@@ -152,11 +186,19 @@ class TestSystemPrompt:
         assert "recit" in prompt_lower  # matches "recite" / "recitation"
         assert "source_refs" in SYSTEM_PROMPT
 
-    def test_has_research_outcome_output_field(self):
-        """Output schema carries research_outcome so the fallback path is machine-readable."""
-        assert "research_outcome" in SYSTEM_PROMPT
-        assert '"story"' in SYSTEM_PROMPT
-        assert '"hook_fallback"' in SYSTEM_PROMPT
+    def test_has_json_safety_rules(self):
+        """Output schema section instructs the model on JSON escaping discipline.
+
+        Invalid JSON breaks the pipeline; this is enforced at parse time too
+        (see producer/script.py generate_segment repair path), but the prompt
+        is the first line of defense. research_outcome is NOT in the output
+        schema — observed `server_tool_use` blocks are the source of truth.
+        """
+        assert "JSON safety rules" in SYSTEM_PROMPT
+        assert "\\\"" in SYSTEM_PROMPT
+        assert "\\n" in SYSTEM_PROMPT
+        # The LLM-self-report field is gone; search usage is observed, not claimed.
+        assert "research_outcome" not in SYSTEM_PROMPT
 
     def test_forbids_explicit_bridge(self):
         """Prompt forbids 'because you watched X, here's Y' explicit bridges."""

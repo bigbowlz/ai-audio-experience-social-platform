@@ -3,6 +3,7 @@
 Spec: docs/specs/2026-04-17-producer-alignment-plan.md Task 0.1
       producer/docs/DESIGN.md §Interface contract
 """
+
 from __future__ import annotations
 
 from agents.protocol import (
@@ -15,9 +16,14 @@ from agents.protocol import (
 
 def test_running_order_minimal_shape():
     pitch: Pitch = {
-        "agent": "youtube", "title": "t", "hook": "h",
-        "source_refs": [], "priority": 0.9, "thin_signal": False,
-        "claim_kind": "neutral", "provenance_shape": "balanced",
+        "agent": "youtube",
+        "title": "t",
+        "hook": "h",
+        "source_refs": [],
+        "priority": 0.9,
+        "thin_signal": False,
+        "claim_kind": "neutral",
+        "provenance_shape": "balanced",
         "suggested_length_sec": 90,
     }
     order: RunningOrder = {
@@ -42,7 +48,7 @@ def test_external_decision_skip_shape():
 
 def test_creator_agent_listing_shape():
     listing: CreatorAgentListing = {
-        "handle": "@AlicesLens",
+        "handle": "@GoddamnAxl",
         "display_name": "Alice's Lens",
         "scope": "tech / startup culture",
         "price_usdc": 0.10,
