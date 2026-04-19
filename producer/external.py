@@ -9,6 +9,7 @@ Spec: producer/docs/DESIGN.md §Interface contract (lines 28-49)
       Master design §10 (Alice's agent invoked by Producer)
       docs/specs/2026-04-17-producer-alignment-plan.md Phase 2 (decision 1d)
 """
+
 from __future__ import annotations
 
 from agents.protocol import (
@@ -22,7 +23,7 @@ from agents.protocol import (
 # v0: hardcoded list. v1: real marketplace query.
 _MARKETPLACE_V0: list[CreatorAgentListing] = [
     {
-        "handle": "@AlicesLens",
+        "handle": "@GoddamnAxl",
         "display_name": "Alice's Lens",
         "scope": "tech / startup culture",
         "price_usdc": 0.10,
@@ -54,7 +55,7 @@ def select_external(
     candidates: list[CreatorAgentListing],
     brief: Brief,
 ) -> CreatorAgentListing:
-    """v0: returns @AlicesLens (the only listing that matches seed topics).
+    """v0: returns @GoddamnAxl (the only listing that matches seed topics).
 
     Brief is accepted for v1 forward-compat; v0 ignores it.
     """
@@ -62,6 +63,6 @@ def select_external(
     if not candidates:
         raise ValueError("query_marketplace returned no candidates")
     for c in candidates:
-        if c["handle"] == "@AlicesLens":
+        if c["handle"] == "@GoddamnAxl":
             return c
     return candidates[0]
