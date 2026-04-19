@@ -32,12 +32,18 @@ def _signals_path(user_id: str, episode_id: str) -> Path:
 
 
 def append_signal(user_id: str, episode_id: str, record: FeedbackRecord) -> None:
-    """Append one record to ./data/signals/{user_id}/{episode_id}.jsonl."""
+    """Append one record to ./data/signals/{user_id}/{episode_id}.jsonl.
+
+    The record + trailing newline go out in a single `f.write` call so a
+    SIGKILL between the JSON payload and the newline can't happen. If the
+    two writes were separate, a subsequent append after such a kill would
+    produce `{...}{...}\\n` on one line, which json.loads would silently
+    drop on read — a real data-loss path.
+    """
     path = _signals_path(user_id, episode_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False))
-        f.write("\n")
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def iter_signals(user_id: str) -> Iterator[FeedbackRecord]:
