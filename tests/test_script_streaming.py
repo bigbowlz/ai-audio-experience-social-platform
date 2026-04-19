@@ -314,3 +314,134 @@ class TestResearchFallbackTelemetry:
 
         with pytest.raises(ValueError, match="too short"):
             await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
+
+
+class TestSegmentCacheIntegration:
+    @pytest.mark.asyncio
+    async def test_cache_miss_writes_artifact(self, monkeypatch, tmp_path):
+        """First call with no cache writes the artifact and emits cache_written."""
+        import json as _json
+        monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
+
+        bus = EventBus()
+        captured: list[tuple[str, dict]] = []
+        bus.subscribe(lambda n, p: captured.append((n, p)))
+        set_default_bus(bus)
+
+        try:
+            def fake_create(**kwargs):
+                return _resp_text(_segment_json(pitch_title="Jazz", script="x" * 50))
+
+            monkeypatch.setattr("producer.script._client.messages.create", fake_create)
+
+            pitch = _pitch("youtube", "Jazz")
+            brief = _brief()
+            await generate_segment(pitch, brief, is_first=True)
+        finally:
+            set_default_bus(EventBus())
+
+        # Artifact present on disk
+        date = brief["today_context"]["date"].replace("-", "")
+        expected = tmp_path / "segment_scripts" / f"youtube_jazz_{date}_130.json"
+        assert expected.exists()
+        art = _json.loads(expected.read_text(encoding="utf-8"))
+        assert set(art.keys()) == {"segment", "debug"}
+        assert art["segment"]["pitch_title"] == "Jazz"
+        assert "research_outcome" in art["debug"]
+        assert "raw_llm_text" in art["debug"]
+        assert "input_pitch" in art["debug"]
+        assert art["debug"]["target_words"] == _target_words_helper(pitch["suggested_length_sec"])
+        assert art["debug"]["words_per_minute"] == 130
+
+        # cache_written event emitted
+        cw = [(n, p) for n, p in captured if n == "producer.segment.cache_written"]
+        assert len(cw) == 1
+        assert cw[0][1]["agent"] == "youtube"
+        assert cw[0][1]["pitch_title"] == "Jazz"
+        assert cw[0][1]["cache_path"] == str(expected)
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_skips_llm_and_emits_cache_hit(self, monkeypatch, tmp_path):
+        """Second call with a matching cache hits and never calls the LLM."""
+        monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
+
+        def fake_create(**kwargs):
+            return _resp_text(_segment_json(pitch_title="Jazz", script="x" * 50))
+
+        monkeypatch.setattr("producer.script._client.messages.create", fake_create)
+        pitch = _pitch("youtube", "Jazz")
+        brief = _brief()
+        # Prime the cache
+        await generate_segment(pitch, brief, is_first=True)
+
+        # Now switch the mock to raise — a real call would fail.
+        def raising_create(**kwargs):
+            raise AssertionError("LLM must not be called on cache hit")
+
+        monkeypatch.setattr("producer.script._client.messages.create", raising_create)
+
+        bus = EventBus()
+        captured: list[tuple[str, dict]] = []
+        bus.subscribe(lambda n, p: captured.append((n, p)))
+        set_default_bus(bus)
+
+        try:
+            seg = await generate_segment(pitch, brief, is_first=True)
+        finally:
+            set_default_bus(EventBus())
+
+        assert seg["pitch_title"] == "Jazz"
+        hits = [(n, p) for n, p in captured if n == "producer.segment.cache_hit"]
+        assert len(hits) == 1
+        assert hits[0][1]["agent"] == "youtube"
+        assert hits[0][1]["pitch_title"] == "Jazz"
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_different_wpm_is_a_miss(self, monkeypatch, tmp_path):
+        """wpm is part of the cache key — changing it invalidates."""
+        import json as _json
+        monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
+        monkeypatch.delenv("PRODUCER_WORDS_PER_MIN", raising=False)
+
+        call_count = [0]
+
+        def fake_create(**kwargs):
+            call_count[0] += 1
+            return _resp_text(_segment_json(pitch_title="Jazz", script="x" * 50))
+
+        monkeypatch.setattr("producer.script._client.messages.create", fake_create)
+        pitch = _pitch("youtube", "Jazz")
+        brief = _brief()
+        await generate_segment(pitch, brief, is_first=True)   # writes wpm=130 file
+        assert call_count[0] == 1
+
+        monkeypatch.setenv("PRODUCER_WORDS_PER_MIN", "150")
+        await generate_segment(pitch, brief, is_first=True)   # must miss — different wpm
+        assert call_count[0] == 2
+
+    @pytest.mark.asyncio
+    async def test_cache_write_survives_oserror_on_write(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        """Cache-write failure must not block generation; logs and continues."""
+        monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
+
+        def fake_create(**kwargs):
+            return _resp_text(_segment_json(pitch_title="Jazz", script="x" * 50))
+
+        monkeypatch.setattr("producer.script._client.messages.create", fake_create)
+
+        def bad_write(*a, **kw):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("producer.script._write_cached_artifact", bad_write)
+
+        # Must not raise.
+        seg = await generate_segment(_pitch("youtube", "Jazz"), _brief(), is_first=True)
+        assert seg["pitch_title"] == "Jazz"
+
+
+# Small helper for the target_words assertion in the cache artifact test above.
+def _target_words_helper(sec: int) -> int:
+    from producer.script import _target_words
+    return _target_words(sec)

@@ -486,6 +486,34 @@ def _extract_segment_text(response: object) -> str:
     return text_blocks[-1].text.strip()
 
 
+def _validate_segment(seg: SegmentScript, is_first: bool) -> None:
+    """Enforce first-segue-empty, script-length floor, and segue-cap warning.
+
+    Same checks the old generate_segment ran inline — lifted out so both the
+    cache-hit path and the LLM path enforce them identically.
+    """
+    if is_first and seg["segue_in"].strip():
+        raise ValueError(
+            f"First segment must have empty segue_in. Got: {seg['segue_in']!r}"
+        )
+
+    if len(seg["script"].strip()) < _MIN_SCRIPT_CHARS:
+        raise ValueError(
+            f"Segment ({seg['agent']}/{seg['pitch_title']}) script too short: "
+            f"{len(seg['script'])} chars (min {_MIN_SCRIPT_CHARS})"
+        )
+
+    if not is_first:
+        segue_words = len(seg["segue_in"].split())
+        if segue_words > _SEGUE_WORD_CAP:
+            print(
+                f"[producer.script] segue over cap "
+                f"({segue_words} words > {_SEGUE_WORD_CAP}): "
+                f"{seg['agent']}/{seg['pitch_title']!r} segue_in={seg['segue_in']!r}",
+                file=sys.stderr,
+            )
+
+
 async def generate_segment(
     segment: Pitch,
     brief: Brief,
@@ -493,11 +521,41 @@ async def generate_segment(
 ) -> SegmentScript:
     """Single async LLM call producing one SegmentScript.
 
-    Enforces first-segue-empty and script-length-floor internally.
-    No events emitted here — stream_episode_script handles SSE.
+    Taste segments (youtube, alices) use the web_search tool server-side;
+    weather/calendar segments narrate from `data` only and typically flow
+    through the separate opener prompt.
+
+    Same-day cache: on success, writes a {segment, debug} artifact at
+    `$RADIO_CACHE_DIR/segment_scripts/{agent}_{slug}_{YYYYMMDD}_{wpm}.json`.
+    A matching cache file short-circuits the LLM call entirely.
+
+    Enforces first-segue-empty and script-length-floor on every path
+    (cache hit, story outcome, hook-narration fallback).
+
+    Emits on fallback: `producer.segment.research_fallback`.
+    Emits on cache: `producer.segment.cache_hit` or `producer.segment.cache_written`.
+    No `script.segment.done` emission here — that belongs to `stream_episode_script`.
     """
     if os.environ.get("DISABLE_LLM"):
         raise RuntimeError("LLM disabled via DISABLE_LLM env var")
+
+    wpm = words_per_min()
+    date = brief["today_context"]["date"]
+    cache_path = _segment_cache_path(segment["agent"], segment["title"], date, wpm)
+
+    cached = _read_cached_segment(cache_path)
+    if cached is not None:
+        emit(
+            "producer.segment.cache_hit",
+            {
+                "agent": cached["agent"],
+                "pitch_title": cached["pitch_title"],
+                "cache_path": str(cache_path),
+            },
+        )
+        _validate_segment(cached, is_first)
+        return cached
+
     payload = {
         "segment": {
             "agent": segment["agent"],
@@ -510,8 +568,8 @@ async def generate_segment(
         },
         "today_context": dict(brief["today_context"]),
         "is_first": is_first,
-        "target_words": _target_words(segment["suggested_length_sec"]),
-        "words_per_minute": words_per_min(),
+        "target_words": _target_words(segment["suggested_length_sec"], wpm),
+        "words_per_minute": wpm,
     }
     user_msg = json.dumps(payload, indent=2)
 
@@ -564,26 +622,38 @@ async def generate_segment(
             },
         )
 
-    if is_first and seg["segue_in"].strip():
-        raise ValueError(
-            f"First segment must have empty segue_in. Got: {seg['segue_in']!r}"
-        )
+    _validate_segment(seg, is_first)
 
-    if len(seg["script"].strip()) < _MIN_SCRIPT_CHARS:
-        raise ValueError(
-            f"Segment ({seg['agent']}/{seg['pitch_title']}) script too short: "
-            f"{len(seg['script'])} chars (min {_MIN_SCRIPT_CHARS})"
+    debug = {
+        "search_query": None,
+        "search_used": research_outcome == "story",
+        "broadened": False,
+        "research_outcome": research_outcome,
+        "raw_llm_text": raw,
+        "input_pitch": {
+            "title": segment["title"],
+            "hook": segment["hook"],
+            "source_refs": list(segment.get("source_refs", [])),
+            "claim_kind": segment.get("claim_kind", "neutral"),
+        },
+        "target_words": _target_words(segment["suggested_length_sec"], wpm),
+        "words_per_minute": wpm,
+    }
+    try:
+        _write_cached_artifact(cache_path, seg, debug)
+        emit(
+            "producer.segment.cache_written",
+            {
+                "agent": seg["agent"],
+                "pitch_title": seg["pitch_title"],
+                "cache_path": str(cache_path),
+            },
         )
-
-    if not is_first:
-        segue_words = len(seg["segue_in"].split())
-        if segue_words > _SEGUE_WORD_CAP:
-            print(
-                f"[producer.script] segue over cap "
-                f"({segue_words} words > {_SEGUE_WORD_CAP}): "
-                f"{seg['agent']}/{seg['pitch_title']!r} segue_in={seg['segue_in']!r}",
-                file=sys.stderr,
-            )
+    except OSError as exc:
+        print(
+            f"[producer.script] cache write failed for {cache_path}: {exc!r} — continuing",
+            file=sys.stderr,
+        )
 
     return seg
 
