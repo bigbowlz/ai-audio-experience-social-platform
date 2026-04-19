@@ -60,6 +60,15 @@ Hooks are NOT spoken on-air; they are input for the Producer.
    provenance entries provided. Do not hallucinate channel names, video \
    titles, dates, or statistics.
 5. **Never reference topics you did not select.** Each hook is self-contained.
+6. **Title shape.** Titles must include at least one concrete topical \
+   anchor — a genre, era, named public artist or work, decade span, or \
+   recognizable sub-movement. Titles drive a downstream web search; if a \
+   search engine would return generic think-pieces for the title, rewrite \
+   it. Good: "10cc to RAYE: pop across 50 years", "Nocturnes, 19th century \
+   to now", "Independent film in 2026". Bad: "Classics Meet New Anthems", \
+   "Film Fever Taking Over" — punchy but topically void. Titles are \
+   producer-internal handles, not on-air — favor searchability over \
+   radio-style flair.
 
 ## claim_kind constraints
 
@@ -99,7 +108,7 @@ Return ONLY the JSON array — no markdown fences, no commentary.
 
 PATRICKS_SYSTEM_PROMPT = """\
 You are a research assistant writing creative briefs for a radio Producer. \
-The candidates below come from @AlicesLens — an EXTERNAL CURATOR whose \
+The candidates below come from @GoddamnAxl — an EXTERNAL CURATOR whose \
 YouTube activity was captured once (Day-0 data). These pitches reflect \
 PATRICK'S taste, not the listener's.
 
@@ -117,6 +126,15 @@ Hooks are NOT spoken on-air; they are input for the Producer.
 4. **Never invent facts.** Every factual claim must map to a provenance \
    entry (channel_name, video_title, subscribed_at, liked_at).
 5. **Respect claim_kind for temporal framing** (see below).
+6. **Title shape.** Titles must include at least one concrete topical \
+   anchor — a genre, era, named public artist or work, decade span, or \
+   recognizable sub-movement. Titles drive a downstream web search; if a \
+   search engine would return generic think-pieces for the title, rewrite \
+   it. Good: "Bach violin repertoire", "Espresso gear 2026", "Aerosmith \
+   acoustic covers". Bad: "Alice's Classical Picks", "Alice's Food \
+   Finds" — generic curator labels with no topical anchor. Titles are \
+   producer-internal handles, not on-air — favor searchability over \
+   radio-style flair. The curator framing lives in the hook, not the title.
 
 ## claim_kind directives (for Alice, not the listener)
 
@@ -135,7 +153,7 @@ Each hook is a multi-line string with three labeled sections:
 
 ```
 WHAT: Curator recommendation on {topic} (claim_kind={claim_kind}) — {specific evidence from provenance, e.g. "@pg's essay on founders in Alice's recent likes"}.
-SOURCE: @AlicesLens (external curator, pre-captured Day-0 data) — NOT the listener's own interest.
+SOURCE: @GoddamnAxl (external curator, pre-captured Day-0 data) — NOT the listener's own interest.
 GOAL: Expose the listener to Alice's taste. Narrate as curator pick ('Alice's been into X', 'Alice flagged Y'), never as listener taste ('you've been into X'). Respect claim_kind directives for temporal framing.
 ```
 
@@ -167,6 +185,7 @@ SYSTEM_PROMPT = YOUTUBE_SYSTEM_PROMPT
 
 # ── Candidate formatting ─────────────────────────────────────────────
 
+
 def _format_contributor(c: Contributor) -> dict[str, Any]:
     """Slim contributor for prompt context."""
     out: dict[str, Any] = {"kind": c["kind"], "channel": c["channel_name"]}
@@ -187,15 +206,25 @@ def _format_bundle(
     """Format the candidate bundle + brief as the user message."""
     candidates = []
     for item in bundle:
-        candidates.append({
-            "topic": item["topic"],
-            "score": round(item["score"], 4),
-            "long_term": round(item["long_term"], 4),
-            "recent": round(item["recent"], 4),
-            "claim_kind": item["claim_kind"].value if isinstance(item["claim_kind"], ClaimKind) else item["claim_kind"],
-            "provenance_shape": item["provenance_shape"].value if isinstance(item["provenance_shape"], ProvenanceShape) else item["provenance_shape"],
-            "provenance": [_format_contributor(c) for c in item["provenance"]],
-        })
+        candidates.append(
+            {
+                "topic": item["topic"],
+                "score": round(item["score"], 4),
+                "long_term": round(item["long_term"], 4),
+                "recent": round(item["recent"], 4),
+                "claim_kind": (
+                    item["claim_kind"].value
+                    if isinstance(item["claim_kind"], ClaimKind)
+                    else item["claim_kind"]
+                ),
+                "provenance_shape": (
+                    item["provenance_shape"].value
+                    if isinstance(item["provenance_shape"], ProvenanceShape)
+                    else item["provenance_shape"]
+                ),
+                "provenance": [_format_contributor(c) for c in item["provenance"]],
+            }
+        )
 
     payload = {
         "candidates": candidates,
@@ -205,6 +234,7 @@ def _format_bundle(
 
 
 # ── LLM call ─────────────────────────────────────────────────────────
+
 
 def generate_pitches(
     bundle: list[dict[str, Any]],
@@ -265,15 +295,25 @@ def generate_pitches(
             else:
                 source_refs.append(c["channel_name"])
 
-        pitches.append(Pitch(
-            agent=agent_name,
-            title=sel.get("title", topic.replace("-", " ").title()),
-            hook=sel["hook"],
-            source_refs=list(dict.fromkeys(source_refs)),
-            priority=min(1.0, max(0.0, float(sel.get("priority", item["score"])))),
-            thin_signal=False,
-            claim_kind=claim_kind.value if isinstance(claim_kind, ClaimKind) else claim_kind,
-            provenance_shape=prov_shape.value if isinstance(prov_shape, ProvenanceShape) else prov_shape,
-        ))
+        pitches.append(
+            Pitch(
+                agent=agent_name,
+                title=sel.get("title", topic.replace("-", " ").title()),
+                hook=sel["hook"],
+                source_refs=list(dict.fromkeys(source_refs)),
+                priority=min(1.0, max(0.0, float(sel.get("priority", item["score"])))),
+                thin_signal=False,
+                claim_kind=(
+                    claim_kind.value
+                    if isinstance(claim_kind, ClaimKind)
+                    else claim_kind
+                ),
+                provenance_shape=(
+                    prov_shape.value
+                    if isinstance(prov_shape, ProvenanceShape)
+                    else prov_shape
+                ),
+            )
+        )
 
     return pitches

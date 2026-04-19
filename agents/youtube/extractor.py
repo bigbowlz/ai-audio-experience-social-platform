@@ -39,7 +39,7 @@ class InterestProfile(TypedDict):
 # ── Constants ────────────────────────────────────────────────────────
 
 RECENT_HALF_LIFE_DAYS = 90
-BLEND_HALF_SATURATION_K = 5.0
+BLEND_HALF_SATURATION_K = 100.0
 PROVENANCE_K = 5
 PROVENANCE_SUB_SLOTS = 2
 PROVENANCE_LIKE_SLOTS = 3
