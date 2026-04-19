@@ -271,15 +271,24 @@ def cli_main(argv: list[str] | None = None) -> int:
     print(f"[orchestrator] Running episode for user_id={args.user_id!r} …\n")
 
     # ── Internal pitch round ─────────────────────────────────────────
-    from agents.calendar.agent import CalendarAgent
-    from agents.weather.agent import WeatherAgent
-    from agents.youtube.agent import YouTubeAgent
-
     agent_names = _select_internal_agent_classes(
         weather=args.weather,
         calendar=args.calendar,
         youtube=args.youtube,
     )
+
+    # Auth preflight BEFORE agent class imports — if an artifact is missing,
+    # preflight runs the inline auth flow (browser + fallback URL to stdout)
+    # and raises RuntimeError only if the flow failed to produce the artifact.
+    # Running preflight here ensures a missing artifact surfaces as a clean
+    # preflight error, not a constructor-time explosion inside the agent.
+    from auth.preflight import ensure_agent_auth
+    for name in agent_names:
+        ensure_agent_auth(name)
+
+    from agents.calendar.agent import CalendarAgent
+    from agents.weather.agent import WeatherAgent
+    from agents.youtube.agent import YouTubeAgent
 
     _CLASS_BY_NAME = {
         "weather": WeatherAgent,
