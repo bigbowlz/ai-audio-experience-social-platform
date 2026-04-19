@@ -554,6 +554,16 @@ async def generate_segment(
         estimated_length_sec=data.get("estimated_length_sec", 60),
     )
 
+    if research_outcome == "hook_fallback":
+        emit(
+            "producer.segment.research_fallback",
+            {
+                "agent": seg["agent"],
+                "pitch_title": seg["pitch_title"],
+                "reason": "empty_search",
+            },
+        )
+
     if is_first and seg["segue_in"].strip():
         raise ValueError(
             f"First segment must have empty segue_in. Got: {seg['segue_in']!r}"
