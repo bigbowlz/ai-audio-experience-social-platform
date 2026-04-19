@@ -39,7 +39,6 @@ fetch_context(user_id)
       {
         "weather_summary": str,                    # narrative for Brief
         "current": CurrentConditions,
-        "hourly_forecast": list[HourlyForecast],   # next 24h from current hour
         "day_past": DayPast,                       # what already happened today
         "day_ahead": DayAhead,                     # what's still coming today
         "air_quality": AirQuality | None,
@@ -47,6 +46,9 @@ fetch_context(user_id)
         "location_name": str,
         "fetched_at": str                          # ISO 8601
       }
+      # hourly_forecast is computed internally (drives notable_facts and
+      # the narrative compiler) but not surfaced — the Producer consumes
+      # notable_facts and day_ahead, not raw hourly data.
 
 pitch(brief, memory, context, user_id)
   |
@@ -201,13 +203,15 @@ class DayAhead(TypedDict):
 class WeatherScopeContext(TypedDict):
     weather_summary: str              # narrative summary for Brief.today_context
     current: CurrentConditions
-    hourly_forecast: list[HourlyForecast]  # next 24h from current hour
     day_past: DayPast                 # replaces old `daily` (time-aware)
     day_ahead: DayAhead               # replaces old `daily` (time-aware)
     air_quality: AirQuality | None    # None when AQ fetch fails; see Fallback Behavior table
     notable_facts: list[WeatherFact]  # top 3 most interesting observations
     location_name: str                # "San Francisco, CA" or similar
     fetched_at: str                   # ISO 8601 timestamp
+    # hourly_forecast is computed internally but NOT surfaced — raw hourly
+    # data was noise for the Producer; notable_facts + day_ahead are the
+    # downstream inputs. The 24h-window parsing lives in _parse_forecast().
 ```
 
 ## Narrative Compiler
@@ -253,41 +257,25 @@ Deterministic function, no LLM. Takes weather data, outputs a 2-3 sentence summa
 
 ## Pitch Generation
 
-Deterministic. No LLM. Emits exactly 1 Pitch:
+Deterministic. No LLM. Emits exactly 1 Pitch.
 
-```python
-def pitch(self, brief, memory, context, user_id) -> list[Pitch]:
-    summary = context.get("weather_summary")
+**Hook format: structured WHAT / SOURCE / GOAL.** The hook is a creative
+brief to the Producer — never spoken verbatim. The what/source/goal
+layout forbids treating the hook as speakable prose and tells the
+Producer explicitly that `data` is the content source.
 
-    # Degraded: no weather data (API failure or no location)
-    if not summary:
-        return [Pitch(
-            agent="weather", title="Weather",
-            hook="Weather data unavailable.",
-            rationale="Weather fetch failed or no location set.",
-            source_refs=[], priority=0.3,
-            thin_signal=True, claim_kind="neutral",
-            provenance_shape="balanced",
-        )]
-
-    notable = context.get("notable_facts", [])
-    location = context.get("location_name", "your area")
-
-    # Build hook from notable facts for Producer
-    if notable:
-        highlights = "; ".join(f["summary"] for f in notable[:3])
-        hook = f"Weather in {location}: {highlights}. Full conditions available for your script."
-    else:
-        hook = f"Weather in {location}: {summary}"
-
-    return [Pitch(
-        agent="weather", title=f"Weather in {location}",
-        hook=hook, rationale=summary,
-        source_refs=[], priority=0.5,
-        thin_signal=False, claim_kind="neutral",
-        provenance_shape="balanced",
-    )]
 ```
+WHAT: Weather for {location} — {top-3 notable-fact summaries joined by "; "}.
+SOURCE: Open-Meteo live feed (listener's GPS location: {location}).
+GOAL: Ground the show in today's real-world conditions. Use data.current,
+      data.day_ahead, and data.notable_facts as the content source; this
+      hook is orientation only.
+```
+
+Degraded (no location or forecast-API failure) emits a degraded WHAT
+line, `priority=0.3`, `thin_signal=True`. No `rationale` field — agents
+stopped emitting it (it was write-only across the codebase). See
+`agents/weather/agent.py` for the canonical implementation.
 
 ## Location Acquisition
 
@@ -306,13 +294,13 @@ The weather agent reads lat/lon from user profile. The location approval flow is
 
 ## Fallback Behavior
 
-| Condition | Pitch text | Priority | thin_signal |
-|-----------|------------|----------|-------------|
-| No location in profile | "Weather data unavailable." | 0.3 | True |
-| Forecast API failure (timeout/error) | "Weather data unavailable." | 0.3 | True |
+| Condition | Hook WHAT line | Priority | thin_signal |
+|-----------|----------------|----------|-------------|
+| No location in profile | "Weather segment, degraded (no data available)." | 0.3 | True |
+| Forecast API failure (timeout/error) | "Weather segment, degraded (no data available)." | 0.3 | True |
 | AQ API fails, forecast succeeds | Normal pitch (AQ omitted from narrative) | 0.5 | False |
-| Forecast succeeds, 0 notable facts | Hook from summary + location | 0.5 | False |
-| Forecast succeeds, notable facts exist | Hook from top 3 highlights | 0.5 | False |
+| Forecast succeeds, 0 notable facts | "Weather for {loc} — steady conditions, no notable facts" | 0.5 | False |
+| Forecast succeeds, notable facts exist | "Weather for {loc} — {top-3 highlights}" | 0.5 | False |
 
 ## Implementation Notes
 
@@ -335,7 +323,7 @@ The orchestrator copies `WeatherScopeContext["weather_summary"]` into `Brief.tod
 ## Protocol Compliance
 
 - Implements `DataAgent` protocol (`agents/protocol.py`)
-- `load_memory()`: returns `bootstrap_memory()` (no weather-specific memory in v0)
+- `load_memory()`: returns `bootstrap_memory()` (no weather-specific memory in v0). Weather pitches carry `topic=None` in their `PitchEmission`, so learning-loop does not target weather's `topic_multiplier` even when unstubbed. Weather can still affect `ProducerMemory.agent_weights["weather"]` via per-segment like/replay/skip — but in v0 learning-loop is stubbed (no writes). See `learning_loop/docs/DESIGN.md` §v0 stub contract.
 - `fetch_context(user_id)`: returns `ScopeContext` (typed as `WeatherScopeContext`)
 - `pitch(brief, memory, context, user_id)`: returns `list[Pitch]` with exactly 1 pitch
 - `claim_kind`: always `"neutral"`

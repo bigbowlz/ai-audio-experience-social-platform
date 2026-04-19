@@ -40,7 +40,6 @@ def _pitch(agent: str, title: str, priority: float, seg_len: int = 90) -> dict:
         "agent": agent,
         "title": title,
         "hook": "hook text",
-        "rationale": "test",
         "source_refs": [],
         "priority": priority,
         "thin_signal": False,

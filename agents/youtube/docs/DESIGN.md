@@ -15,6 +15,8 @@ Pitch 3–5 ranked topics to the Producer derived from the user's YouTube world 
 
 **Signal-derived memory is read-only from this agent.** `topic_multiplier` writes (signal ingestion, update rules, session-end batching) live entirely in the `learning-loop` component — see [§Memory boundary](#memory-boundary-decided-2026-04-15) below. `DataAgent.observe()` is **dropped** from the protocol as of 2026-04-15 — learning-loop consumes `EpisodeSignals` directly; see §`AgentMemory` schema for the locked contract.
 
+**Learning-loop is stubbed in v0 (2026-04-18).** No `/react` ingestion, no session-end writes. `topic_multiplier` stays at its bootstrap default `{}` for the entire v0 demo, so `pitch()`'s `combined_topic_scores[T] * topic_multiplier.get(T, 1.0)` read collapses to `combined_topic_scores[T]` (the multiplier term is identity). Demos that need a non-identity `topic_multiplier` (e.g., to show Episode B's topic re-ranking) seed it via `learning_loop.seed_topic_multiplier(user_id, "youtube", {...})` before generation. See `learning_loop/docs/DESIGN.md` §v0 stub contract.
+
 This is the most design-heavy of the four agents: calendar and weather are structured-input → pitch; `alices_agent` is hand-curated content. YouTube is the only one where "what does a good interest profile look like?" is itself an open question.
 
 ## Two-layer architecture (decided, revised 2026-04-15 for write-through)
@@ -159,7 +161,7 @@ stats: {
 
 ## `AgentMemory` schema (locked 2026-04-15)
 
-`AgentMemory` is the persisted per-(user, agent) state record. It is the coupling contract between `agents/youtube` (and other topic-scored agents) and `learning-loop`. This section is the canonical definition; `learning-loop/docs/DESIGN.md` will reference this shape when that doc is rewritten — today's learning-loop draft predates this contract and uses a stale shape (`entity_scores` / `topic_scores` / `signal_weights`) that is superseded here.
+`AgentMemory` is the persisted per-(user, agent) state record. It is the coupling contract between `agents/youtube` (and other topic-scored agents) and `learning_loop`. This section is the canonical definition; `learning_loop/docs/DESIGN.md` references this shape as the locked contract (component stubbed in v0 — see `learning_loop/docs/DESIGN.md` §v0 stub contract).
 
 ### Shape
 
@@ -174,7 +176,7 @@ class AgentMemory(TypedDict):
 **`topic_multiplier` stays `dict[str, float]`** — not a richer audit-trail shape such as `list[(topic, multiplier, source_episode, timestamp)]`. Reasons:
 
 - **Memory is current state, not history.** `pitch()` reads a single current multiplier per topic. A richer shape forces pitch() to fold history down to the latest value on every read, pushing learning-loop's internal structure into an agent's read path.
-- **Audit lives in the signals log, not memory.** Learning-loop already owns a `signals` table (see `learning-loop/docs` §Build plan) that preserves every `/react` event. Any "why did jazz move from 1.1× to 0.85×" question is answered by joining that log with `EpisodeSignals.emissions` — one lookup on the authoritative source, not a duplicated copy in memory.
+- **Audit lives in the signals log, not memory.** Learning-loop owns a `signals` table (see `learning_loop/docs/DESIGN.md` §When unstubbed) that preserves every `/react` event when unstubbed. Any "why did jazz move from 1.1× to 0.85×" question is answered by joining that log with `EpisodeSignals.emissions` — one lookup on the authoritative source, not a duplicated copy in memory.
 - **Session-end batching collapses history.** Multiple `/react` events on one topic within one session produce one aggregated delta per session. There is no natural "one entry per update" to preserve in a list without either losing the batching semantics or re-deriving them at read-time.
 - **Schema stability.** Flat `dict[str, float]` is the minimum shape learning-loop needs to write and agents need to read. Future richer structures (per-episode attribution snapshots, versioned history) can land as **new additive fields** on `AgentMemory` without rewriting this one.
 
@@ -218,7 +220,7 @@ class ReactionEvent(TypedDict):
     type:                   Literal["like", "skip", "replay"]
     segment_index:          int           # foreign key into EpisodeSignals.emissions[*].segment_index
     timestamp_ms:           int
-    segment_position_sec:   float         # playhead before mutation; see learning-loop/docs RC #4
+    segment_position_sec:   float         # playhead before mutation; see learning_loop/docs/DESIGN.md Reviewer Concern #4
 
 class EpisodeSignals(TypedDict):
     schema_version:  int                  # = 1 for v0
@@ -270,7 +272,7 @@ AgentMemory(
 1. `fetch_context()` runs. On success: `profile_state` overwritten with a real `InterestProfile`. On failure: empty `InterestProfile` remains in place.
 2. `pitch()` reads `profile_state.combined_topic_scores`. If empty (fetch failure or zero-subs/zero-likes user): emit exactly 1 thin-signal `Pitch` (§`pitch()` flow output contract).
 3. `topic_multiplier == {}` → `pitch()`'s `.get(T, 1.0)` default makes this identical to "all topics at neutral multiplier." No cold-start branching required inside `pitch()`.
-4. At session-end, learning-loop applies reactions (if any) → first non-empty `topic_multiplier` snapshot persists.
+4. At session-end, learning-loop applies reactions (if any) → first non-empty `topic_multiplier` snapshot persists. **v0 stub:** this step does not fire in v0. `topic_multiplier` stays `{}` across episodes unless fixture-seeded.
 
 ## Aggregation: TF-IDF with sublinear TF and L1 normalization (decided 2026-04-14, IDF scope revised 2026-04-15)
 
@@ -631,7 +633,7 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
 | `agents` (parent)   | `DataAgent` protocol, `Pitch` shape, `Brief` shape                                                                                            | in             |
 | `agents/alices`   | Imports shared extractor — `extract_profile(subs, likes, channel_topics, video_topics, now) -> InterestProfile`                               | out            |
-| `learning-loop`     | `AgentMemory` shape, `EpisodeSignals` shape (both locked 2026-04-15, §`AgentMemory` schema); learning-loop owns `topic_multiplier` writes     | in             |
+| `learning-loop`     | `AgentMemory` shape, `EpisodeSignals` shape (both locked 2026-04-15, §`AgentMemory` schema); learning-loop owns `topic_multiplier` writes. **v0 stubbed** — no writes in v0; `topic_multiplier` stays `{}` unless fixture-seeded via `learning_loop.seed_topic_multiplier()` | in             |
 | `api-storage`       | Persists `AgentMemory` via `agent_memory` table; caches OAuth tokens + topic-tag lookups (`channel_id` / `video_id` → tags)                   | in/out         |
 | `producer`          | Consumes `list[Pitch]`                                                                                                                        | out            |
 | YouTube Data API v3 | `subscriptions.list`, `playlistItems.list` (user OAuth); `channels.list?part=topicDetails` + `videos.list?part=topicDetails` (server API key) | external (out) |

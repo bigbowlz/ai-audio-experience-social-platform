@@ -1,6 +1,33 @@
 # Producer Step 2 Prompt Redesign
 
-**Status:** APPROVED — brainstorming cleared 2026-04-17
+**Status:** SUPERSEDED 2026-04-18 — see "Superseded by" note below.
+**Original status:** APPROVED — brainstorming cleared 2026-04-17
+
+> **Superseded by (2026-04-18):** This spec's core decision was to INCLUDE
+> more fields in the Step-2 payload (`data`, `rationale`, `source_refs`).
+> That decision was partially reversed on 2026-04-18 as part of the
+> agent-output conventions pass:
+>
+> - `rationale` was removed from the `Pitch` TypedDict entirely (write-only
+>   across the codebase).
+> - `priority`, `suggested_length_sec`, `provenance_shape`, and
+>   `target_total_secs` were removed from the Step-2 payload because
+>   SYSTEM_PROMPT already told the LLM to ignore or not re-rank on them.
+>   Keeping them in the payload was dead weight.
+> - `data` and `source_refs` remain (this spec's Pitch-coverage fix still holds).
+> - Weather, calendar, and alices hooks moved to a structured
+>   WHAT / SOURCE / GOAL format; alices hooks explicitly flag external
+>   curator provenance.
+> - Per-agent provenance semantics (youtube=listener / alices=curator /
+>   weather,calendar=context) are now encoded in SYSTEM_PROMPT rather
+>   than as a new Pitch field.
+>
+> Canonical current state: `agents/docs/prompt_design.md` §4 Step 2,
+> `producer/script.py` SYSTEM_PROMPT, and `agents/docs/DESIGN.md` §Pitch shape.
+> The rest of this document documents the 2026-04-17 redesign as it landed;
+> read it for the pacing / drop-segments / field-legend structure that is
+> still in force.
+
 **Parent docs:**
 
 - `agents/docs/prompt_design.md` §4 Step 2 — current Step 2 spec (this redesign updates it)
@@ -10,7 +37,7 @@
 - `agents/youtube/llm.py` + `agents/youtube/docs/DESIGN.md` — claim_kind / provenance_shape directive reference
 - `agents/weather/agent.py`, `agents/weather/docs/DESIGN.md` — weather `Pitch.data` shape
 - `agents/calendar/agent.py`, `agents/calendar/docs/DESIGN.md` — calendar `Pitch.data` shape
-- `learning-loop/docs/DESIGN.md` — `ProducerMemory` shape (in-flight)
+- `learning_loop/docs/DESIGN.md` — `ProducerMemory` shape (in-flight)
 
 **Memory feedback applied:**
 
@@ -34,7 +61,7 @@ Current `producer/script.py` underspecifies the Step 2 LLM contract on four axes
 | ------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Cannot drop segments                              | prompt_design.md §4 Step 2 constraint #1; producer/script.py:171-178                |
 | Cannot invent segments                            | prompt_design.md §4 Step 2 constraint #2                                            |
-| Memory isolation (P9): Producer is memory-blind   | learning-loop/docs/DESIGN.md; feedback_producer_memory_deterministic.md             |
+| Memory isolation (P9): Producer is memory-blind   | learning_loop/docs/DESIGN.md; feedback_producer_memory_deterministic.md             |
 | Agent hooks are creative briefs, not scripts      | prompt_design.md §3                                                                 |
 | Hook ownership: Producer never rewrites hooks     | prompt_design.md §3 ("Producer rewrites agent hooks" rejected alternative)          |
 | Two-LLM boundary: agents own taste, Producer owns world | agents/docs/DESIGN.md §Two-LLM boundary                                       |

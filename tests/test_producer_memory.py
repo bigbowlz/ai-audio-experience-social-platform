@@ -61,7 +61,6 @@ def _pitch(agent: str, title: str, priority: float, seg_len: int = 90) -> Pitch:
         agent=agent,
         title=title,
         hook="hook",
-        rationale="r",
         source_refs=[],
         priority=priority,
         thin_signal=False,

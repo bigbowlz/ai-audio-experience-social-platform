@@ -110,41 +110,48 @@ def _template_hook(
     claim_kind: ClaimKind,
     contributors: list[Contributor],
 ) -> str:
+    """Structured what/source/goal brief to the Producer.
+
+    External-curator semantics are explicit: this pitch reflects Alice's
+    taste, NOT the listener's — the Producer must narrate it as curator
+    recommendation, never as "here's something you searched for".
+    """
     label = _topic_label(topic)
     subs = [c for c in contributors if c["kind"] == "sub"]
     likes = [c for c in contributors if c["kind"] == "like"]
 
     if claim_kind == ClaimKind.RISING:
         ref = likes[0]["channel_name"] if likes else label
-        return (
-            f"Alice's been getting into {label} lately — "
-            f"{ref} has been showing up in his feed."
-        )
-
-    if claim_kind == ClaimKind.DISCOVERY:
+        evidence = f"{ref} trending in Alice's recent likes"
+    elif claim_kind == ClaimKind.DISCOVERY:
         if likes and likes[0]["video_title"]:
             ref = f'"{likes[0]["video_title"]}" on {likes[0]["channel_name"]}'
         elif likes:
             ref = likes[0]["channel_name"]
         else:
             ref = label
-        return f"Some {label} caught Alice's eye recently — {ref}."
-
-    if claim_kind == ClaimKind.DURABLE:
+        evidence = f"Alice recently surfaced {ref}"
+    elif claim_kind == ClaimKind.DURABLE:
         ref = subs[0]["channel_name"] if subs else label
         since = ""
         if subs and subs[0].get("subscribed_at"):
-            since = f" since {subs[0]['subscribed_at'][:4]}"
-        return (
-            f"Alice's been into {label} for a while — "
-            f"subscribed to {ref}{since}."
-        )
+            since = f" (since {subs[0]['subscribed_at'][:4]})"
+        evidence = f"Alice has been subscribed to {ref}{since}"
+    else:  # NEUTRAL
+        if contributors:
+            ref = contributors[0]["channel_name"]
+            evidence = f"{label} appeared in Alice's YouTube activity via {ref}"
+        else:
+            evidence = f"{label} appeared in Alice's YouTube data"
 
-    # NEUTRAL
-    if contributors:
-        ref = contributors[0]["channel_name"]
-        return f"{label.title()} showed up in Alice's YouTube activity — {ref}."
-    return f"{label.title()} appeared in Alice's YouTube data."
+    return (
+        f"WHAT: Curator recommendation on {label} (claim_kind={claim_kind.value}) — {evidence}.\n"
+        f"SOURCE: @AlicesLens (external curator, pre-captured Day-0 data) — NOT the listener's own interest.\n"
+        f"GOAL: Expose the listener to Alice's taste. "
+        f"Narrate as curator pick ('Alice's been into X', 'Alice flagged Y'), "
+        f"never as listener taste ('you've been into X'). "
+        f"Respect claim_kind directives for temporal framing."
+    )
 
 
 # ── Thin-signal pitch ────────────────────────────────────────────────
@@ -154,10 +161,12 @@ def _thin_signal_pitch() -> Pitch:
         agent="alices",
         title="Alice's YouTube world",
         hook=(
-            "Not enough signal yet to personalize Alice's segment. "
-            "Pitch a general-interest segment in Alice's domain."
+            "WHAT: General-interest curator segment in Alice's domain (photography, travel, tech). "
+            "No specific topic ranking available.\n"
+            "SOURCE: @AlicesLens (external curator, pre-captured Day-0 data) — NOT the listener's own interest.\n"
+            "GOAL: Write a general-interest segment framed as Alice's curator voice. "
+            "Do not personalize to the listener; no channels/subs/videos by name."
         ),
-        rationale="Thin signal — insufficient YouTube data to rank topics.",
         source_refs=[],
         priority=0.3,
         thin_signal=True,
@@ -268,10 +277,6 @@ class AlicesAgent:
                 agent="alices",
                 title=_topic_label(topic).title(),
                 hook=hook,
-                rationale=(
-                    f"Topic '{topic}' scored {item['score']:.4f} "
-                    f"(combined), claim_kind={claim_kind.value}."
-                ),
                 source_refs=list(dict.fromkeys(source_refs)),
                 priority=min(1.0, round(item["score"], 4)),
                 thin_signal=False,

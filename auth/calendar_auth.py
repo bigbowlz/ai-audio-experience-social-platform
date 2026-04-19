@@ -1,4 +1,4 @@
-"""One-time OAuth consent flow for Google Calendar API.
+"""One-time OAuth consent flow for Google Calendar API + user profile.
 
 Usage:
     python auth/calendar_auth.py
@@ -6,7 +6,10 @@ Usage:
 Requires a Google Cloud OAuth client ID JSON file. Set the path via:
     GOOGLE_OAUTH_CLIENT_SECRET=path/to/client_secret.json
 
-Stores the token at ~/.config/radio-podcast/calendar_token.json
+Stores the token at ~/.config/radio-podcast/calendar_token.json and the
+user profile (first_name, display_name, email) at
+~/.config/radio-podcast/user_profile.json — consumed by the orchestrator
+to thread Brief.user_profile through to the Producer's cold open.
 """
 
 from __future__ import annotations
@@ -14,16 +17,42 @@ from __future__ import annotations
 import json
 import os
 import sys
+import urllib.request
 from pathlib import Path
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/userinfo.email",
+]
 TOKEN_DIR = Path.home() / ".config" / "radio-podcast"
 TOKEN_PATH = TOKEN_DIR / "calendar_token.json"
+USER_PROFILE_PATH = TOKEN_DIR / "user_profile.json"
+_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
 
 _DEFAULT_CREDENTIALS = Path(__file__).parent / "credentials.json"
+
+
+def _fetch_user_profile(access_token: str) -> dict:
+    """Call Google's userinfo endpoint once and return the parsed response.
+
+    Returns {} on failure — the caller writes whatever's there and the
+    orchestrator treats an absent/empty profile as "address as 'you'".
+    """
+    req = urllib.request.Request(
+        _USERINFO_URL,
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        print(f"[auth] userinfo fetch failed: {e}; proceeding with empty profile")
+        return {}
 
 
 def main() -> None:
@@ -56,6 +85,15 @@ def main() -> None:
         "expiry": creds.expiry.isoformat() if creds.expiry else None,
     }))
     print(f"Token saved to {TOKEN_PATH}")
+
+    userinfo = _fetch_user_profile(creds.token)
+    profile = {
+        "first_name": userinfo.get("given_name"),
+        "display_name": userinfo.get("name"),
+        "email": userinfo.get("email"),
+    }
+    USER_PROFILE_PATH.write_text(json.dumps(profile, indent=2))
+    print(f"Profile saved to {USER_PROFILE_PATH} (first_name={profile['first_name']!r})")
 
 
 if __name__ == "__main__":

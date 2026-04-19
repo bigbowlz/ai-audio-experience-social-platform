@@ -134,7 +134,6 @@ class TestPitch:
         for p in pitches:
             assert "title" in p
             assert "hook" in p
-            assert "rationale" in p
             assert "source_refs" in p
             assert "priority" in p
             assert "thin_signal" in p

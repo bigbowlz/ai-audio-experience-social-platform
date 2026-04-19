@@ -1,5 +1,14 @@
 # Producer Alignment Implementation Plan
 
+> **Partially superseded (2026-04-18).** Code snippets in this plan include
+> `rationale` on `Pitch` fixtures and in the Step-2 payload. Those were
+> removed on 2026-04-18 as part of the agent-output conventions pass
+> (rationale was write-only; priority / suggested_length_sec /
+> provenance_shape / target_total_secs were dropped from the Step-2
+> payload for the same reason). Unrelated `rationale` on `ExternalDecision`
+> (see §Phase 2) is still live. Canonical current Pitch shape:
+> `agents/protocol.py`. Canonical Step-2 payload: `producer/script.py`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Bring `producer/` implementation up to the contracts documented in `producer/docs/DESIGN.md`, `agents/docs/prompt_design.md`, the master design (`wanlizhou-main-design-20260413-182237.md`), and `docs/specs/2026-04-17-producer-step2-prompt.md`. Eight discrepancies were locked in during the 2026-04-17 cross-check; this plan executes them in dependency order.

@@ -9,7 +9,7 @@ Spec: agents/docs/DESIGN.md §Interface contract
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import TypedDict, Protocol, runtime_checkable
+from typing import NotRequired, TypedDict, Protocol, runtime_checkable
 
 
 # ── Today's context (assembled by orchestrator from weather + calendar) ──
@@ -22,10 +22,25 @@ class TodayContext(TypedDict):
     calendar_events: list[str] | None   # ["Team standup 10am"] — None if no calendar agent
 
 
+# ── UserProfile: identity fields (separate from TodayContext, which is "what's true today") ──
+
+class UserProfile(TypedDict, total=False):
+    """Per-user identity fields the Producer may use in spoken script.
+
+    `total=False` because any field may be absent — Producer must tolerate None.
+    Sourced from Google OAuth (openid profile scope) via auth/calendar_auth.py
+    and cached at ~/.config/radio-podcast/user_profile.json. Absent for
+    any user who has not completed auth.
+    """
+    first_name: str     # "Alice" — preferred salutation in cold open
+    display_name: str   # "Alice Guesto" — full name; v0 informational only
+
+
 # ── Brief: per-episode context object, same for all agents ──
 
 class Brief(TypedDict):
     today_context: TodayContext
+    user_profile: NotRequired[UserProfile | None]  # absent or None = address user as "you"
 
 
 # ── ScopeContext: base shape; each agent extends it with its own fields ──
@@ -46,7 +61,6 @@ class Pitch(TypedDict, total=False):
     title: str
     hook: str                   # creative brief for Producer — not spoken verbatim
     data: dict                  # structured payload; agent-specific (e.g. calendar events)
-    rationale: str
     source_refs: list[str]      # channel_ids / video_ids / etc.
     priority: float             # [0, 1]; higher = more important
     thin_signal: bool           # True iff exactly 1 pitch due to insufficient data

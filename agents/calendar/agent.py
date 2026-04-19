@@ -240,6 +240,9 @@ class CalendarAgent:
     ) -> list[Pitch]:
         """Emit 1 schedule-context pitch carrying raw rich event data.
 
+        Hook is a structured what/source/goal brief to the Producer — never
+        spoken verbatim. Content lives in `data.events`; hook orients the Producer.
+
         Priority scales by event count:
           0 events  -> 0.50
           1-3       -> 0.55
@@ -261,13 +264,32 @@ class CalendarAgent:
         else:
             priority = 0.65
 
+        if not api_reachable:
+            hook = (
+                "WHAT: Schedule segment, degraded (Google Calendar unreachable).\n"
+                "SOURCE: Google Calendar (live OAuth, listener's primary calendar) — API call failed.\n"
+                "GOAL: Skip or acknowledge briefly; no event content to narrate."
+            )
+        elif n == 0:
+            hook = (
+                "WHAT: Schedule segment — 0 upcoming events in the next 16 hours.\n"
+                "SOURCE: Google Calendar (live OAuth, listener's primary calendar).\n"
+                "GOAL: Frame as an open day; no specific event to reference."
+            )
+        else:
+            hook = (
+                f"WHAT: Schedule segment — {n} upcoming event(s) in the next 16 hours.\n"
+                "SOURCE: Google Calendar (live OAuth, listener's primary calendar).\n"
+                "GOAL: Orient the listener to today's shape before taste segments. "
+                "Use data.events as the content source; pick the single most narratively useful event to reference."
+            )
+
         return [
             Pitch(
                 agent="calendar",
                 title="Today's schedule",
-                hook=f"{n} calendar events today" if api_reachable else "Calendar unavailable",
+                hook=hook,
                 data={"api_reachable": api_reachable, "events": rich_events},
-                rationale=f"Calendar: {n} event(s) today." if api_reachable else "Google Calendar API unreachable.",
                 source_refs=[],
                 priority=priority,
                 thin_signal=False,

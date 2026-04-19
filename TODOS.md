@@ -47,7 +47,15 @@ Deferred work tracked from design reviews. Each item includes context so someone
 ## Producer (from /brainstorming 2026-04-17)
 
 ### Weather data digest before Producer prompt
-**Priority:** Medium (v1, when token cost matters)
+**Status:** Partially resolved 2026-04-18 — `hourly_forecast` was dropped
+at the AGENT layer (`agents/weather/agent.py`) rather than via a
+Producer-side projection, which is simpler and avoids per-agent coupling
+in the Producer. `day_past` is still in `Pitch.data` but SYSTEM_PROMPT
+instructs the LLM to ignore it unless a specific hour matters. Remaining
+work is deciding whether to drop `day_past` structurally too; tracked as
+a follow-up below if it matters for token cost.
+**Priority:** Low (was medium — the dominant token cost was
+`hourly_forecast`, now gone)
 **What:** Producer's `_format_input` projects weather `Pitch.data` to a lean subset (`current`, `day_ahead`, `notable_facts`, `air_quality`, `location_name`) instead of passing the full 24-entry `hourly_forecast`.
 **Why:** v0 passes weather data verbatim — ~3-4k tokens per episode just on weather, most unused by a 45s segment. Cutting `hourly_forecast` and `day_past` saves ~60% of weather tokens with no semantic loss for typical episodes.
 **Pros:** Smaller prompts, faster generation, lower cost.
