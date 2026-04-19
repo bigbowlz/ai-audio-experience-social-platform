@@ -98,6 +98,13 @@ class DataAgent(Protocol):
     # observe() was dropped 2026-04-15 — learning-loop consumes EpisodeSignals
     # directly from api-storage at session-end and writes signal-derived memory
     # fields itself. See agents/youtube/docs/DESIGN.md §`AgentMemory` schema.
+    #
+    # v0 LEARNING-LOOP IS STUBBED (2026-04-18). No /react ingestion, no session-end
+    # writes, no memory.update.* SSE. Agents still call load_memory() and receive
+    # a bootstrapped AgentMemory with topic_multiplier={} — pitch()'s
+    # `topic_multiplier.get(T, 1.0)` collapses to identity. Memory-seeded demos
+    # use learning_loop.seed_topic_multiplier() directly. See
+    # learning_loop/docs/DESIGN.md §v0 stub contract.
 ```
 
 **`user_id` in `pitch()`.** Required for deterministic tie-breaking in candidate selection (`top_n_seeded` uses `(user_id, profile.computed_at)` as seed). See youtube spec §`pitch()` flow.
@@ -114,12 +121,27 @@ class TodayContext(TypedDict):
     weather_summary: str | None         # "rainy, 14°C" — None if weather fetch failed
     calendar_events: list[str] | None   # ["Team standup 10am", "Dentist 3pm"] — None if no calendar agent
 
+class UserProfile(TypedDict, total=False):
+    """Per-user identity — sibling of TodayContext inside Brief.
+
+    Written once at OAuth time by auth/calendar_auth.py to
+    ~/.config/radio-podcast/user_profile.json; loaded by the orchestrator
+    during Brief assembly. `total=False`: any field may be absent, and
+    Brief.user_profile itself may be None for users who have not
+    completed auth.
+    """
+    first_name: str     # "Alice" — Producer cold-open salutation
+    display_name: str   # "Alice Guesto" — v0 informational
+
 class Brief(TypedDict):
     today_context: TodayContext         # assembled by orchestrator from weather + calendar ScopeContext
+    user_profile: NotRequired[UserProfile | None]  # absent or None → Producer addresses user as "you"
     # v1+: user_preferences, episode_format, target_duration, etc.
 ```
 
 `Brief.today_context` is populated by the orchestrator after Phase 1 (`fetch_context()`). Weather and calendar agents return their data as `ScopeContext` fields; the orchestrator reads those and assembles `today_context` before calling `pitch()`. See prompt_design.md §3 for the full flow.
+
+`Brief.user_profile` is loaded by the orchestrator from the on-disk cache written at OAuth time. TodayContext stays pure (what's true today); UserProfile is a sibling because identity is not a property of "today". Only the Producer's cold open consumes it in v0 — agents do not use `user_profile` in pitch selection.
 
 ### `ScopeContext` shape
 
@@ -152,7 +174,6 @@ Base fields (all agents):
   "agent": "youtube",
   "title": "...",
   "hook": "...",
-  "rationale": "...",
   "source_refs": ["..."],
   "priority": 0.91
 }
@@ -168,6 +189,33 @@ Extended fields (set by the algo step in each agent's `pitch()`, not by the LLM)
 }
 ```
 
+**Hook format.** YouTube emits prose hooks (second-person, constrained by
+`claim_kind` + `provenance_shape` — see `llm.py`'s `YOUTUBE_SYSTEM_PROMPT`).
+Weather, calendar, and alices emit structured `WHAT` / `SOURCE` /
+`GOAL` hooks — creative briefs to the Producer, never spoken verbatim.
+Alices hooks explicitly flag external-curator provenance ("NOT the
+listener's own interest") so the Producer narrates them as curator pick,
+not listener taste.
+
+**`rationale` field (removed).** `rationale` is gone from the `Pitch`
+TypedDict and from all agent emissions. It was write-only across the
+codebase — every agent set it, nothing read it except the Producer
+Step-2 LLM payload, where SYSTEM_PROMPT told the LLM to treat it as
+"context for tone; never spoken". The unrelated `rationale` on
+`ExternalDecision` is a different field on a different TypedDict and is
+still consumed via SSE.
+
+**Per-agent provenance semantics** (encoded in Producer SYSTEM_PROMPT,
+not in per-pitch Pitch fields — identical across every pitch of a given
+agent, so it belongs in the Producer's prompt, not the hook):
+
+| `agent` | Whose taste? | Producer narrates as... |
+|---|---|---|
+| `youtube` | listener's own (live OAuth) | second person — "you've been into X" |
+| `alices` | external curator (pre-captured Day-0) | third person — "Alice's been into X"; never "you" |
+| `weather` | neither (environmental) | ground-truth facts about the listener's day |
+| `calendar` | neither (schedule) | ground-truth facts about the listener's day |
+
 - **`thin_signal`** (`bool`): `true` iff agent emitted exactly 1 pitch due to insufficient data. Producer uses this for time-budget allocation only; no special user-facing language.
 - **`claim_kind`** (`"durable" | "rising" | "discovery" | "neutral"`): deterministic temporal-framing constraint. See prompt_design.md §1 for preconditions and LLM prompt contract. Computed by `youtube_agent` and `alices_agent` (both use the shared extractor and `InterestProfile`). Weather and calendar agents default to `"neutral"`.
 - **`provenance_shape`** (`"balanced" | "sub_only" | "like_only"`): deterministic evidence-framing constraint. See prompt_design.md §2 for per-shape LLM directives. Computed by `youtube_agent` and `alices_agent`. Weather and calendar agents default to `"balanced"`.
@@ -176,7 +224,7 @@ Extended fields (set by the algo step in each agent's `pitch()`, not by the LLM)
 
 | Component       | Contract                                                                                                                                          | Direction                                         |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `learning-loop` | `AgentMemory` shape, `EpisodeSignals` shape (both locked 2026-04-15 in `agents/youtube/docs/DESIGN.md`); learning-loop owns signal-derived writes | agents consume memory schema; no `observe()` hook |
+| `learning-loop` | `AgentMemory` shape, `EpisodeSignals` shape (both locked 2026-04-15 in `agents/youtube/docs/DESIGN.md`); learning-loop owns signal-derived writes. **v0 stubbed** — no writes in v0; see `learning_loop/docs/DESIGN.md` §v0 stub contract | agents consume memory schema; no `observe()` hook |
 | `producer`      | consumes `list[Pitch]`                                                                                                                            | agents emit; producer ranks                       |
 | `payment`       | `alices_agent` has `wallet_address` that receives tx                                                                                            | payment reads wallet from agent                   |
 | `api-storage`   | `agent_memory` table (jsonb per user_id+agent_name)                                                                                               | agents persist through api-storage                |

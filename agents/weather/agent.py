@@ -542,7 +542,6 @@ class WeatherAgent:
         return {  # type: ignore[return-value]
             "weather_summary": summary,
             "current": weather_data["current"],
-            "hourly_forecast": weather_data["hourly_forecast"],
             "day_past": weather_data["day_past"],
             "day_ahead": weather_data["day_ahead"],
             "air_quality": air_quality,
@@ -558,7 +557,11 @@ class WeatherAgent:
         context: ScopeContext,
         user_id: str,
     ) -> list[Pitch]:
-        """Emit 1 weather-context pitch. Deterministic, no LLM."""
+        """Emit 1 weather-context pitch. Deterministic, no LLM.
+
+        Hook is a structured what/source/goal brief to the Producer — never
+        spoken verbatim. Content lives in `data`; hook orients the Producer.
+        """
         summary = context.get("weather_summary")  # type: ignore[call-overload]
 
         # Degraded: no weather data
@@ -566,8 +569,11 @@ class WeatherAgent:
             return [Pitch(
                 agent="weather",
                 title="Weather",
-                hook="Weather data unavailable.",
-                rationale="Weather fetch failed or no location set.",
+                hook=(
+                    "WHAT: Weather segment, degraded (no data available).\n"
+                    "SOURCE: Open-Meteo live feed (listener's GPS location) — fetch failed or no location set.\n"
+                    "GOAL: Acknowledge briefly; no forecast content to narrate."
+                ),
                 source_refs=[],
                 priority=0.3,
                 thin_signal=True,
@@ -581,15 +587,21 @@ class WeatherAgent:
 
         if notable:
             highlights = "; ".join(f["summary"] for f in notable[:3])
-            hook = f"Weather in {location}: {highlights}."
+            what = f"Weather for {location} — {highlights}"
         else:
-            hook = f"Weather in {location}: {summary}"
+            what = f"Weather for {location} — steady conditions, no notable facts"
+
+        hook = (
+            f"WHAT: {what}.\n"
+            f"SOURCE: Open-Meteo live feed (listener's GPS location: {location}).\n"
+            f"GOAL: Ground the show in today's real-world conditions. "
+            f"Use data.current, data.day_ahead, and data.notable_facts as the content source; this hook is orientation only."
+        )
 
         return [Pitch(
             agent="weather",
             title=f"Weather in {location}",
             hook=hook,
-            rationale=summary,
             source_refs=[],
             priority=0.5,
             thin_signal=False,
@@ -599,7 +611,6 @@ class WeatherAgent:
                 "current": context.get("current"),  # type: ignore[call-overload]
                 "day_past": context.get("day_past"),  # type: ignore[call-overload]
                 "day_ahead": context.get("day_ahead"),  # type: ignore[call-overload]
-                "hourly_forecast": context.get("hourly_forecast"),  # type: ignore[call-overload]
                 "air_quality": context.get("air_quality"),  # type: ignore[call-overload]
                 "notable_facts": notable,
                 "location_name": location,

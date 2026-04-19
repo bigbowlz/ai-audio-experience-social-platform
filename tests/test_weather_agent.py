@@ -755,10 +755,10 @@ class TestFetchContext:
         assert ctx["weather_summary"] is not None
         assert isinstance(ctx["weather_summary"], str)
         assert "current" in ctx
-        assert "hourly_forecast" in ctx
         assert "day_past" in ctx
         assert "day_ahead" in ctx
         assert "daily" not in ctx  # replaced by the two split blocks
+        assert "hourly_forecast" not in ctx  # dropped — consumed internally
         assert "notable_facts" in ctx
         assert "location_name" in ctx
         assert ctx["location_name"] == "San Francisco, CA"
@@ -892,25 +892,9 @@ class TestFetchContext:
         assert day_past["high_f"] is None
         assert day_ahead["sunset"] == "19:58"
 
-    def test_hourly_forecast_24h_window(self):
-        from unittest.mock import patch, MagicMock
-        from agents.weather.agent import WeatherAgent
-
-        agent = WeatherAgent()
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get = MagicMock(side_effect=_mock_httpx_get())
-
-        with patch("agents.weather.agent.httpx.Client", return_value=mock_client):
-            with patch("agents.weather.agent._get_user_location",
-                       return_value=(37.7749, -122.4194, "San Francisco, CA")):
-                with patch("agents.weather.agent._current_hour", return_value=10):
-                    ctx = agent.fetch_context("user1")
-
-        hourly = ctx["hourly_forecast"]
-        assert len(hourly) == 24
-        assert hourly[0]["hour"] == 10  # starts at current hour
+# hourly_forecast is computed internally (drives notable_facts and the
+# narrative compiler) but is no longer surfaced in ScopeContext or
+# Pitch.data — the 24h-window shape is exercised via notable_facts tests.
 
 
 # ── Pitch tests ──
@@ -944,7 +928,8 @@ class TestPitch:
         assert p["priority"] == 0.3
         assert p["thin_signal"] is True
         assert p["claim_kind"] == "neutral"
-        assert "unavailable" in p["hook"].lower()
+        assert "degraded" in p["hook"].lower()
+        assert "no data available" in p["hook"].lower()
 
     def test_summary_without_notables(self):
         from agents.weather.agent import WeatherAgent

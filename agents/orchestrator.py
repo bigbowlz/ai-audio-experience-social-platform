@@ -22,12 +22,49 @@ import concurrent.futures
 import json
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agents.protocol import AgentMemory, Brief, DataAgent, Pitch, ScopeContext, TodayContext
+from agents.protocol import (
+    AgentMemory,
+    Brief,
+    DataAgent,
+    Pitch,
+    ScopeContext,
+    TodayContext,
+    UserProfile,
+)
 
 if TYPE_CHECKING:
     pass
+
+
+# ── User profile loader ───────────────────────────────────────────────
+
+_USER_PROFILE_PATH = Path.home() / ".config" / "radio-podcast" / "user_profile.json"
+
+
+def _load_user_profile() -> UserProfile | None:
+    """Return UserProfile from ~/.config/radio-podcast/user_profile.json, or None.
+
+    Written once by auth/calendar_auth.py after OAuth consent. Absent file,
+    parse error, or absent fields all degrade cleanly to None — the Producer
+    falls back to addressing the user as "you".
+    """
+    if not _USER_PROFILE_PATH.exists():
+        return None
+    try:
+        raw = json.loads(_USER_PROFILE_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    profile: UserProfile = {}
+    first_name = raw.get("first_name")
+    display_name = raw.get("display_name")
+    if isinstance(first_name, str) and first_name.strip():
+        profile["first_name"] = first_name.strip()
+    if isinstance(display_name, str) and display_name.strip():
+        profile["display_name"] = display_name.strip()
+    return profile or None
 
 
 # ── Time-of-day helper ────────────────────────────────────────────────
@@ -128,7 +165,7 @@ def _run_pitch_round(
             "weather_summary": weather_summary,
             "calendar_events": calendar_events,
         }
-        brief = {"today_context": today_context}
+        brief = {"today_context": today_context, "user_profile": _load_user_profile()}
 
     agent_map = {a.name: a for a in agents}
     with concurrent.futures.ThreadPoolExecutor() as pool:
@@ -304,7 +341,7 @@ if __name__ == "__main__":
         try:
             episode_id = f"ep-{int(time.time())}"
             result = asyncio.run(run_episode_pipeline(selected, brief, episode_id))
-            print(f"── Cold open ──\n{result.cold_open}\n")
+            print(f"── Opener ──\n{result.opener}\n")
             for seg_result in result.audio.segment_results:
                 print(
                     f"  [segment {seg_result['segment_index']}] "

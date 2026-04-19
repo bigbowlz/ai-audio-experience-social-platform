@@ -29,9 +29,19 @@ from agents.youtube.guardrails import ClaimKind, ProvenanceShape
 MODEL = os.environ.get("YOUTUBE_LLM_MODEL", "claude-sonnet-4-6")
 MAX_TOKENS = 2048
 
-# ── System prompt ────────────────────────────────────────────────────
+# ── System prompts ───────────────────────────────────────────────────
+#
+# Two prompts share the same candidate-bundle format but differ in framing:
+#
+#   YOUTUBE_SYSTEM_PROMPT — for agent_name="youtube". Prose hooks in
+#     second-person ("you've been into X"). The listener's own data.
+#
+#   PATRICKS_SYSTEM_PROMPT — for agent_name="alices". Structured
+#     what/source/goal hooks that explicitly flag external-curator
+#     provenance. The pitch reflects Alice's taste, not the listener's —
+#     the Producer must narrate accordingly.
 
-SYSTEM_PROMPT = """\
+YOUTUBE_SYSTEM_PROMPT = """\
 You are a radio show research assistant. Your job is to select the best \
 3–5 topics from a ranked candidate list and write a short "hook" for each — \
 a creative brief that a Producer will use to script a radio segment. \
@@ -86,6 +96,73 @@ Return a JSON array of objects. Each object has:
 
 Return ONLY the JSON array — no markdown fences, no commentary.
 """
+
+PATRICKS_SYSTEM_PROMPT = """\
+You are a research assistant writing creative briefs for a radio Producer. \
+The candidates below come from @AlicesLens — an EXTERNAL CURATOR whose \
+YouTube activity was captured once (Day-0 data). These pitches reflect \
+PATRICK'S taste, not the listener's.
+
+Your job is to select 3–5 topics and write a structured hook for each. \
+Hooks are NOT spoken on-air; they are input for the Producer.
+
+## Rules
+
+1. **Select 3–5 candidates** from the provided list. Prefer variety.
+2. **Assign priority ∈ [0, 1]** per selected topic. Use algo `score` as \
+   baseline, adjust for narrative variety.
+3. **External-curator framing is mandatory.** Every hook must make it \
+   unambiguous that the evidence comes from Alice's own account, not \
+   the listener's. Use "Alice", never "you".
+4. **Never invent facts.** Every factual claim must map to a provenance \
+   entry (channel_name, video_title, subscribed_at, liked_at).
+5. **Respect claim_kind for temporal framing** (see below).
+
+## claim_kind directives (for Alice, not the listener)
+
+- **durable**: "Alice has been into X for a while", reference \
+  subscription dates. Prohibited: "lately", "recently".
+- **rising**: "Alice has been getting into X lately", "X is trending \
+  in his recent activity". Prohibited: "longtime", "always".
+- **discovery**: "Alice recently surfaced X", "some X caught Alice's \
+  eye". Prohibited: "deep into", "longtime".
+- **neutral**: factual — "X appeared in Alice's subs/likes", reference \
+  specific channel/video names. Prohibited: any temporal or intensity claim.
+
+## Output hook format (structured, not prose)
+
+Each hook is a multi-line string with three labeled sections:
+
+```
+WHAT: Curator recommendation on {topic} (claim_kind={claim_kind}) — {specific evidence from provenance, e.g. "@pg's essay on founders in Alice's recent likes"}.
+SOURCE: @AlicesLens (external curator, pre-captured Day-0 data) — NOT the listener's own interest.
+GOAL: Expose the listener to Alice's taste. Narrate as curator pick ('Alice's been into X', 'Alice flagged Y'), never as listener taste ('you've been into X'). Respect claim_kind directives for temporal framing.
+```
+
+The WHAT line varies per pitch — cite one or two concrete provenance \
+entries. The SOURCE and GOAL lines are fixed text; copy them verbatim. \
+Do not paraphrase SOURCE or GOAL.
+
+## Output format
+
+Return a JSON array of objects. Each object has:
+- `topic`: the topic key (must match a candidate's `topic` field exactly)
+- `title`: a short human-readable title for the segment (2–5 words)
+- `hook`: the structured hook string (WHAT/SOURCE/GOAL, as above)
+- `priority`: float in [0, 1]
+
+Return ONLY the JSON array — no markdown fences, no commentary.
+"""
+
+
+def _system_prompt_for(agent_name: str) -> str:
+    if agent_name == "alices":
+        return PATRICKS_SYSTEM_PROMPT
+    return YOUTUBE_SYSTEM_PROMPT
+
+
+# Back-compat alias: some callers/tests may reference SYSTEM_PROMPT directly.
+SYSTEM_PROMPT = YOUTUBE_SYSTEM_PROMPT
 
 
 # ── Candidate formatting ─────────────────────────────────────────────
@@ -148,7 +225,7 @@ def generate_pitches(
     response = client.messages.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
-        system=SYSTEM_PROMPT,
+        system=_system_prompt_for(agent_name),
         messages=[{"role": "user", "content": user_msg}],
         timeout=30.0,
     )
@@ -192,10 +269,6 @@ def generate_pitches(
             agent=agent_name,
             title=sel.get("title", topic.replace("-", " ").title()),
             hook=sel["hook"],
-            rationale=(
-                f"Topic '{topic}' scored {item['score']:.4f} "
-                f"(combined), claim_kind={claim_kind.value if isinstance(claim_kind, ClaimKind) else claim_kind}."
-            ),
             source_refs=list(dict.fromkeys(source_refs)),
             priority=min(1.0, max(0.0, float(sel.get("priority", item["score"])))),
             thin_signal=False,

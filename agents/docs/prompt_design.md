@@ -248,19 +248,21 @@ All `fetch_context()` calls run in parallel. The orchestrator waits for all to c
 
 ### Pitch shape extension
 
-Two fields added to `Pitch` for Producer consumption (set by the algo step in each agent's `pitch()`, not by the LLM):
+Three fields on `Pitch` for Producer consumption (set by the algo step in each agent's `pitch()`, not by the LLM):
 
 ```python
-# Added to existing Pitch shape (see agents/docs/DESIGN.md)
+# Pitch shape (see agents/docs/DESIGN.md and agents/protocol.py)
 {
     "thin_signal": bool,          # True iff agent emitted exactly 1 pitch due to
                                   #   insufficient data. No special user-facing language;
                                   #   Producer uses this for time-budget allocation only.
     "claim_kind": str,            # "durable" | "rising" | "discovery" | "neutral"
-                                  #   (see §1). Producer can use this to calibrate
-                                  #   script tone for the segment.
+                                  #   (see §1). Producer consumes this in Step 2 to
+                                  #   calibrate temporal framing in the segment script.
     "provenance_shape": str,      # "balanced" | "sub_only" | "like_only"
-                                  #   (see §2). Informational for Producer.
+                                  #   (see §2). Consumed by the AGENT's Step-1 LLM when
+                                  #   writing hooks; NOT passed to the Producer Step-2
+                                  #   LLM (already baked into the hook the Producer sees).
 }
 ```
 
@@ -340,7 +342,6 @@ def select_segments(
     "title": "Your YouTube world",               # generic — no topic to name
     "hook": "Not enough signal yet to personalize. Pitch a general-interest
              segment in the agent's domain.",     # creative brief to Producer
-    "rationale": "Thin signal — insufficient YouTube data to rank topics.",
     "source_refs": [],                            # no provenance to cite
     "priority": 0.3,                              # low but nonzero — guaranteed slot ensures inclusion
     "thin_signal": true,
@@ -349,6 +350,8 @@ def select_segments(
 }
 # Producer assigns suggested_length_sec from DEFAULT_SEGMENT_SEC["youtube"] = 90
 # during select_segments(). Agent does not set it.
+# `rationale` is no longer a Pitch field — removed from the TypedDict
+# because it was write-only across the codebase.
 ```
 
 Producer scripts this segment using its own judgment for the agent's domain. The low priority means thin-signal segments will not win bonus slots, only their guaranteed slot.
@@ -539,28 +542,21 @@ emit("producer.selecting.done", {
 
 ### Step 2: LLM pass — episode script generation
 
-Producer's LLM receives:
+Producer's LLM receives one segment per call (streamed; see `producer/script.py` `stream_episode_script`):
 
-**Input:**
+**Input (per call):**
 
 ```python
 {
-    "selected_segments": [          # from Step 1, ordered by priority (LLM re-orders)
-        {
-            "agent": "youtube",
-            "title": "Jazz exploration",
-            "hook": "...",                  # agent's creative brief — not spoken verbatim
-            "rationale": "...",             # why the agent selected this topic
-            "source_refs": [...],           # human-readable channel/video names
-            "data": {...},                  # structured agent payload (e.g., weather facts, calendar events)
-            "priority": 0.91,
-            "claim_kind": "rising",
-            "provenance_shape": "balanced",
-            "thin_signal": false,
-            "suggested_length_sec": 90,     # assigned by Producer from DEFAULT_SEGMENT_SEC
-        },
-        # ... one per selected segment
-    ],
+    "segment": {
+        "agent": "youtube",
+        "title": "Jazz exploration",
+        "hook": "...",                  # agent's creative brief — not spoken verbatim
+        "source_refs": [...],           # human-readable channel/video names
+        "data": {...},                  # structured agent payload (weather facts, calendar events)
+        "claim_kind": "rising",
+        "thin_signal": false,
+    },
     "today_context": {              # from Brief
         "date": "2026-04-15",
         "day_of_week": "Tuesday",
@@ -568,27 +564,38 @@ Producer's LLM receives:
         "weather_summary": "rainy, 14°C",
         "calendar_events": ["Team standup 10am", "Dentist 3pm"],
     },
-    "target_total_secs": 450,
+    "is_first": true,               # first segment's segue_in must be empty
+    "target_words": 225,            # pacing ceiling for segue_in + script
+    "words_per_minute": 150,
     # NOTE: producer_memory is NOT in this payload.
-    # Per feedback_producer_memory_deterministic.md and
-    # docs/specs/2026-04-17-producer-step2-prompt.md §D1, ProducerMemory
-    # is applied as a pure function upstream (priority scaling at Step 1/1.5,
+    # Per feedback_producer_memory_deterministic.md, ProducerMemory is
+    # applied as a pure function upstream (priority scaling at Step 1/1.5,
     # opener-preference reordering before Step 2 sees selected_segments).
 }
 ```
 
+**Dead fields removed from the payload** (SYSTEM_PROMPT had told the LLM
+to ignore them; keeping them in the payload was dead weight):
+
+- `rationale` — write-only across the codebase; removed from `Pitch` entirely.
+- `priority` — "already consumed upstream, do not re-rank on it".
+- `suggested_length_sec` — "scheduling metadata, not a script-level knob"; `target_words` is the sole pacing input now.
+- `provenance_shape` — already enforced by the agent when writing the hook.
+- `target_total_secs` — episode-level, never referenced in the per-segment prompt.
+
 **System prompt constraints:**
 
-1. **Cannot drop segments.** Every segment in `selected_segments` must appear in the output script. Producer re-orders but does not filter.
+1. **Cannot drop segments.** Every segment passed in must appear in the output script. The caller (`stream_episode_script`) validates at end-of-stream that every input key round-tripped.
 2. **Cannot invent segments.** No topic or content not present in the input.
-3. **Must produce a complete script** with: cold open (10–15s spoken), per-segment script (incorporating agent hook as creative input, not verbatim copy), inter-segment segues (5–10s each), sign-off (10s).
-4. **Today's context** should be woven into cold open and segues where natural. Do not force-fit weather into every segue — use it where it adds texture.
-5. **Segment ordering heuristics** (guidance, not hard rules): time-sensitive content first (calendar, weather), taste content after (youtube, alices). Within taste segments, `rising`/`discovery` claim_kinds are more narratively interesting as middle-of-show energy; `durable` works as a comfortable closer.
-6. **Respect `claim_kind` and `provenance_shape`** per segment — do not add temporal claims the agent's hook didn't make. If `claim_kind` is `neutral`, the segment script should be factual, not enthusiastic.
-7. **First segment's `segue_in` is empty.** The cold open includes the transition into segment 1. Enforced by post-parse validation inside `generate_segment` and re-checked in `stream_episode_script`.
-8. **Per-agent `data` cribs.** weather → use `current`, `day_ahead`, `notable_facts`, `air_quality`, `location_name` (ignore `hourly_forecast` / `day_past` unless surfacing a specific hour matters); calendar → use `events[]` (`summary`, `start`, `end`, `duration_min`, etc.); youtube/alices → `data` is usually empty.
-9. **Hook vs. data layering.** For taste agents (youtube, alices): hook + `claim_kind` cap phrasing; `data` is read-only context for tone calibration only. For context agents (weather, calendar): `data` is the content source; `hook` is a one-line summary.
-10. **`thin_signal` handling.** When `thin_signal: true`, write a general-interest segment in the agent's domain. Optional one-sentence factual close per agent (youtube/alices: "more personal as your YouTube activity grows"; weather: "Local forecast wasn't available today"). No action prompts. Calendar never emits `thin_signal` in v0.
+3. **Must produce a single per-segment script** with: segue-in (≤6 words; empty when `is_first=true`) + spoken script (warm, conversational). Cold open and sign-off are separate LLM calls.
+4. **Today's context** should be woven in where natural. Do not force-fit weather into every segment.
+5. **Segment ordering heuristics** (guidance, not hard rules): time-sensitive content first (calendar, weather), taste content after (youtube, alices). Within taste: `rising`/`discovery` claim_kinds work as mid-show energy; `durable` as a comfortable closer.
+6. **Respect `claim_kind`** per segment — do not add temporal claims the agent's hook didn't make. If `claim_kind` is `neutral`, the segment script should be factual, not enthusiastic.
+7. **First segment's `segue_in` is empty.** The cold open includes the transition into segment 1. Enforced by post-parse validation inside `generate_segment`.
+8. **Per-agent `data` cribs.** weather → use `current`, `day_ahead`, `notable_facts`, `air_quality`, `location_name` (`day_past` ignored unless a specific hour matters; `hourly_forecast` no longer in `data`); calendar → use `events[]` (`summary`, `start`, `end`, `duration_min`, etc.); youtube/alices → `data` is usually empty.
+9. **Hook vs. data layering.** For taste agents (youtube, alices): the hook is the phrasing ceiling; `claim_kind` bounds what may be claimed; `data` is read-only context for tone calibration only. For context agents (weather, calendar, alices): the hook is a structured `WHAT` / `SOURCE` / `GOAL` brief — write the segment body from `data`; the hook is orientation, never spoken. Never speak the WHAT/SOURCE/GOAL labels on-air.
+10. **Per-agent provenance semantics.** `youtube` → listener's own data, narrate in second person ("you've been into X"). `alices` → external curator's data, narrate in third person ("Alice's been into X"); never "you". `weather`/`calendar` → environmental/schedule context, narrate as ground truth.
+11. **`thin_signal` handling.** When `thin_signal: true`, write a general-interest segment in the agent's domain. Optional one-sentence factual close per agent (youtube: "more personal as your YouTube activity grows"; alices: omit — curator data is fixed Day-0; weather: "Local forecast wasn't available today"). No action prompts. Calendar never emits `thin_signal` in v0.
 
 **Output schema:**
 

@@ -56,7 +56,6 @@ def _make_stub_agent(name: str, pitches: list[Pitch] | None = None) -> MagicMock
             title=f"{name} title",
             hook=f"{name} hook",
             data={},
-            rationale="",
             source_refs=[],
             priority=0.5,
             thin_signal=False,

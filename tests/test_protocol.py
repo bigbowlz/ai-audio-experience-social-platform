@@ -15,7 +15,7 @@ from agents.protocol import (
 
 def test_running_order_minimal_shape():
     pitch: Pitch = {
-        "agent": "youtube", "title": "t", "hook": "h", "rationale": "r",
+        "agent": "youtube", "title": "t", "hook": "h",
         "source_refs": [], "priority": 0.9, "thin_signal": False,
         "claim_kind": "neutral", "provenance_shape": "balanced",
         "suggested_length_sec": 90,

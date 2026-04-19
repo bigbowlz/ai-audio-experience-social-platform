@@ -52,9 +52,26 @@ pitch(brief, memory, context, user_id)
   +-- priority: 0.5 if api_reachable=False or 0 events
   |             0.55/0.60/0.65 for 1-3/4-6/7+ events
   +-- Pitch.data = {"api_reachable": bool, "events": calendar_events_rich}
-  +-- Pitch.hook = "{n} calendar events today" | "Calendar unavailable"
+  +-- Pitch.hook = structured WHAT / SOURCE / GOAL brief (see Pitch hook format)
       (Producer LLM reads data, not hook, to generate radio copy)
 ```
+
+### Pitch hook format
+
+Structured WHAT / SOURCE / GOAL, never spoken verbatim. Branches on
+`api_reachable` and event count:
+
+```
+WHAT: Schedule segment — {n} upcoming event(s) in the next 16 hours.
+SOURCE: Google Calendar (live OAuth, listener's primary calendar).
+GOAL: Orient the listener to today's shape before taste segments. Use
+      data.events as the content source; pick the single most narratively
+      useful event to reference.
+```
+
+No `rationale` field — agents stopped emitting it (it was write-only
+across the codebase). See `agents/calendar/agent.py` for degraded and
+zero-event variants.
 
 ### Key design decisions
 
@@ -147,7 +164,7 @@ Priority is scheduling metadata, not taste. It scales with event count so the Pr
 ## Protocol compliance
 
 - Implements `DataAgent` protocol (agents/protocol.py)
-- `load_memory()`: returns `bootstrap_memory()` (no calendar-specific memory in v0)
+- `load_memory()`: returns `bootstrap_memory()` (no calendar-specific memory in v0). Calendar pitches carry `topic=None` in their `PitchEmission`, so learning-loop does not target calendar's `topic_multiplier` even when unstubbed. Calendar can still affect `ProducerMemory.agent_weights["calendar"]` via per-segment like/replay/skip — but in v0 learning-loop is stubbed (no writes). See `learning_loop/docs/DESIGN.md` §v0 stub contract.
 - `fetch_context(user_id)`: returns `ScopeContext` with `api_reachable`, `calendar_events`, `calendar_events_rich`
 - `pitch(brief, memory, context, user_id)`: returns `list[Pitch]` with exactly 1 pitch; `Pitch.data = {"api_reachable": bool, "events": list[dict]}`
 - `claim_kind`: always `"neutral"`
