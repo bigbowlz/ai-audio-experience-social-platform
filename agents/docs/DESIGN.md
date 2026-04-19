@@ -3,9 +3,10 @@
 **Status:** DRAFT (component extract from master design, reconciled 2026-04-15)
 **Master doc:** [`~/.gstack/projects/bigbowlz-ai-audio-experience-social-platform/wanlizhou-main-design-20260413-182237.md`](../../../../.gstack/projects/bigbowlz-ai-audio-experience-social-platform/wanlizhou-main-design-20260413-182237.md) — canonical source; this doc is scoped to the `agents` component only.
 **Child specs:**
+
 - [`agents/youtube/docs/DESIGN.md`](../youtube/docs/DESIGN.md) — `InterestProfile`, TF-IDF, K=5 provenance, `pitch()` flow, `AgentMemory` schema (locked 2026-04-15)
 - [`agents/docs/prompt_design.md`](prompt_design.md) — hook guardrails (`claim_kind`, `provenance_shape`), today's-context handoff, Producer running-order, `EpisodeScript` output
-**Reviewed:** 2026-04-13 (spec review 6/10, red-team); reconciled 2026-04-15 against child specs
+  **Reviewed:** 2026-04-13 (spec review 6/10, red-team); reconciled 2026-04-15 against child specs
 
 ## Purpose
 
@@ -14,7 +15,7 @@ Four agents that produce ranked `Pitch` objects for the Producer. Each owns its 
 - `youtube_agent` (internal, user-selected) — YouTube subscriptions + recency signals (live OAuth)
 - `calendar_agent` (internal, user-selected) — Google Calendar events (live OAuth)
 - `weather_agent` (internal, user-selected) — Open-Meteo (free, no key; requires GPS location)
-- `alices_agent` (external, Producer-invoked, has `price_usdc` + `wallet_address`) — @AlicesLens (pre-captured data)
+- `alices_agent` (external, Producer-invoked, has `price_usdc` + `wallet_address`) — @GoddamnAxl (pre-captured data)
 
 ## Agent Selection & Auth Sequence (decided 2026-04-16)
 
@@ -68,7 +69,7 @@ The pipeline has two LLM boundaries — one inside each agent's `pitch()`, one i
 - **Agent LLM** input: ~8 candidates with provenance, scores, `claim_kind`, `provenance_shape`. Output: 3–5 hooks. Every factual claim maps to a provenance entry the system can trace. Guardrails are structural (deterministic `claim_kind` computed pre-LLM), not prompt-only.
 - **Producer LLM** input: 4–8 selected `Pitch` objects (hooks already written and constrained) + `today_context`. Output: episode script. Producer never sees raw provenance or scores — it can't hallucinate taste claims because it doesn't have the raw evidence to misinterpret. It inherits the agent's already-constrained hooks and wraps them in radio narration.
 
-The boundary also means a hallucination in one layer doesn't compound in the other. If an agent hook slightly overstates interest (scoring 1/2 on the non-fabrication rubric), Producer's script doesn't amplify it further because Producer treats the hook as a creative brief, not as evidence to extrapolate from. Without the boundary, a single LLM seeing raw provenance + episode context would both misclassify the evidence *and* script confident narration around the misclassification — compounding the error in the final spoken output.
+The boundary also means a hallucination in one layer doesn't compound in the other. If an agent hook slightly overstates interest (scoring 1/2 on the non-fabrication rubric), Producer's script doesn't amplify it further because Producer treats the hook as a creative brief, not as evidence to extrapolate from. Without the boundary, a single LLM seeing raw provenance + episode context would both misclassify the evidence _and_ script confident narration around the misclassification — compounding the error in the final spoken output.
 
 **What stays in the agent LLM vs. what moves to Producer.** Agent `pitch()` owns: topic selection (3–5 from ~8 candidates), hook writing (constrained by guardrails), and priority assignment (taste-informed weighting). Producer owns: segment selection from the pitch pool (deterministic `select_segments()`), running order, segment lengths, segues, cold open, sign-off, and today's-context weaving. Segment length is a production concern — agents have no concept of radio pacing. Producer assigns lengths from a per-agent default table (`DEFAULT_SEGMENT_SEC` in `producer/segments.py`) and can override via `length_overrides` (e.g. from Producer memory or user preferences). When marketplace agents need self-description, `default_segment_sec` moves to `DataAgent` metadata.
 
@@ -79,7 +80,7 @@ See prompt_design.md §1–§2 for the guardrail specifics, and youtube spec §S
 ```python
 class DataAgent(Protocol):
     name: str                                  # "youtube", "calendar", "weather", "alices"
-    display_name: str                          # "@YouTube", "@AlicesLens"
+    display_name: str                          # "@YouTube", "@GoddamnAxl"
     scope: str                                 # human-readable scope description
     external: bool                             # True for creator agents only
     price_usdc: float | None                   # None for internal agents
@@ -114,12 +115,19 @@ class DataAgent(Protocol):
 `Brief` is the per-episode context object assembled by the orchestrator before agents pitch. All agents receive the same `Brief`.
 
 ```python
-class TodayContext(TypedDict):
+class TodayContext(TypedDict, total=False):
     date: str                           # ISO 8601 date
     day_of_week: str                    # "Tuesday"
     time_of_day: str                    # "morning" | "afternoon" | "evening" | "night"
+    now: str                            # 24-hour local time "HH:MM:SS" — date carried by `date`
     weather_summary: str | None         # "rainy, 14°C" — None if weather fetch failed
     calendar_events: list[str] | None   # ["Team standup 10am", "Dentist 3pm"] — None if no calendar agent
+
+# total=False: fields may be absent (tests build partial dicts); the
+# orchestrator always populates all six on real runs. `now` was added
+# 2026-04-19 so the Producer opener LLM can reason about the calendar's
+# rolling 16h window — see
+# docs/specs/2026-04-19-prompt-and-cli-polish.md §N1.
 
 class UserProfile(TypedDict, total=False):
     """Per-user identity — sibling of TodayContext inside Brief.
@@ -209,12 +217,12 @@ still consumed via SSE.
 not in per-pitch Pitch fields — identical across every pitch of a given
 agent, so it belongs in the Producer's prompt, not the hook):
 
-| `agent` | Whose taste? | Producer narrates as... |
-|---|---|---|
-| `youtube` | listener's own (live OAuth) | second person — "you've been into X" |
+| `agent`    | Whose taste?                          | Producer narrates as...                             |
+| ---------- | ------------------------------------- | --------------------------------------------------- |
+| `youtube`  | listener's own (live OAuth)           | second person — "you've been into X"                |
 | `alices` | external curator (pre-captured Day-0) | third person — "Alice's been into X"; never "you" |
-| `weather` | neither (environmental) | ground-truth facts about the listener's day |
-| `calendar` | neither (schedule) | ground-truth facts about the listener's day |
+| `weather`  | neither (environmental)               | ground-truth facts about the listener's day         |
+| `calendar` | neither (schedule)                    | ground-truth facts about the listener's day         |
 
 - **`thin_signal`** (`bool`): `true` iff agent emitted exactly 1 pitch due to insufficient data. Producer uses this for time-budget allocation only; no special user-facing language.
 - **`claim_kind`** (`"durable" | "rising" | "discovery" | "neutral"`): deterministic temporal-framing constraint. See prompt_design.md §1 for preconditions and LLM prompt contract. Computed by `youtube_agent` and `alices_agent` (both use the shared extractor and `InterestProfile`). Weather and calendar agents default to `"neutral"`.
@@ -222,12 +230,12 @@ agent, so it belongs in the Producer's prompt, not the hook):
 
 ## Dependencies on other components
 
-| Component       | Contract                                                                                                                                          | Direction                                         |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Component       | Contract                                                                                                                                                                                                                                  | Direction                                         |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | `learning-loop` | `AgentMemory` shape, `EpisodeSignals` shape (both locked 2026-04-15 in `agents/youtube/docs/DESIGN.md`); learning-loop owns signal-derived writes. **v0 stubbed** — no writes in v0; see `learning_loop/docs/DESIGN.md` §v0 stub contract | agents consume memory schema; no `observe()` hook |
-| `producer`      | consumes `list[Pitch]`                                                                                                                            | agents emit; producer ranks                       |
-| `payment`       | `alices_agent` has `wallet_address` that receives tx                                                                                            | payment reads wallet from agent                   |
-| `api-storage`   | `agent_memory` table (jsonb per user_id+agent_name)                                                                                               | agents persist through api-storage                |
+| `producer`      | consumes `list[Pitch]`                                                                                                                                                                                                                    | agents emit; producer ranks                       |
+| `payment`       | `alices_agent` has `wallet_address` that receives tx                                                                                                                                                                                    | payment reads wallet from agent                   |
+| `api-storage`   | `agent_memory` table (jsonb per user_id+agent_name)                                                                                                                                                                                       | agents persist through api-storage                |
 
 ## Build plan touchpoints
 

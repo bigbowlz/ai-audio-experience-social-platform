@@ -273,7 +273,7 @@ Three fields on `Pitch` for Producer consumption (set by the algo step in each a
 ```python
 TARGET_EPISODE_SECS = 450          # 7.5 min for v0; v1 reads from Brief or user pref
 SEGUE_OVERHEAD_SECS = 10           # per inter-segment segue
-OPEN_CLOSE_SECS = 25               # cold open (15s, includes transition into segment 1) + sign-off (10s)
+OPEN_CLOSE_SECS = 25               # cold open (~13s selection budget) + sign-off (~12s; 2026-04-19: was 10s — see docs/specs/2026-04-19-prompt-and-cli-polish.md §P8)
 MAX_SEGMENT_SEC = 90               # cap per segment; prevents budget overflow from guaranteed slots
 
 # Producer owns segment lengths — agents don't set them.
@@ -603,7 +603,7 @@ to ignore them; keeping them in the payload was dead weight):
 class EpisodeScript(TypedDict):
     cold_open: str                          # spoken script, 10–15s
     segments: list[SegmentScript]           # ordered
-    sign_off: str                           # spoken script, ~10s
+    sign_off: str                           # spoken script, ~12s — close beat + parting line (2026-04-19)
 
 class SegmentScript(TypedDict):
     agent: str                              # which agent's pitch this is

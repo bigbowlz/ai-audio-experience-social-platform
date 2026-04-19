@@ -34,10 +34,12 @@ from agents.protocol import (
     TodayContext,
     UserProfile,
 )
+
 # Module-level so tests can monkeypatch `agents.orchestrator.ensure_agent_auth`
 # cleanly. No circular import risk — auth.preflight only does its (lazy)
 # agent-module imports at call time.
 from auth.preflight import ensure_agent_auth
+
 # Same rationale — module-level binding so tests can monkeypatch
 # `agents.orchestrator.hydrate_producer_memory` directly rather than
 # relying on sys.modules side effects from patching the source module.
@@ -77,6 +79,7 @@ def _load_user_profile() -> UserProfile | None:
 
 # ── Time-of-day helper ────────────────────────────────────────────────
 
+
 def _time_of_day(hour: int) -> str:
     if 5 <= hour < 12:
         return "morning"
@@ -103,9 +106,13 @@ def _select_internal_agent_classes(
     semantics — the CLI should print a helpful message.
     """
     names = [
-        n for n, on in zip(
-            _INTERNAL_AGENT_ORDER, (weather, calendar, youtube), strict=True,
-        ) if on
+        n
+        for n, on in zip(
+            _INTERNAL_AGENT_ORDER,
+            (weather, calendar, youtube),
+            strict=True,
+        )
+        if on
     ]
     if not names:
         raise SystemExit(
@@ -116,6 +123,7 @@ def _select_internal_agent_classes(
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────
+
 
 def run_episode(
     internal_agents: list[DataAgent],
@@ -153,7 +161,10 @@ def run_episode(
     if external_agents:
         emit("agent.pitching.started", {"phase": "external"})
         external_pitches, _ = _run_pitch_round(
-            external_agents, user_id, phase="external", brief=brief,
+            external_agents,
+            user_id,
+            phase="external",
+            brief=brief,
         )
         emit("agent.pitching.done", {"phase": "external"})
         pitches_by_agent.update(external_pitches)
@@ -198,6 +209,7 @@ def _run_pitch_round(
             "date": now.date().isoformat(),
             "day_of_week": now.strftime("%A"),
             "time_of_day": _time_of_day(now.hour),
+            "now": now.strftime("%H:%M:%S"),
             "weather_summary": weather_summary,
             "calendar_events": calendar_events,
         }
@@ -220,6 +232,7 @@ def _run_pitch_round(
 
 # ── CLI ───────────────────────────────────────────────────────────────
 
+
 def cli_main(argv: list[str] | None = None) -> int:
     """CLI entry point. Returns process exit code.
 
@@ -229,18 +242,20 @@ def cli_main(argv: list[str] | None = None) -> int:
     import argparse
 
     from payment.stub import initiate_tx
-    from producer.events import JsonlSink, emit, subscribe
+    from producer.events import PrettySink, emit, subscribe
     from producer.external import (
         decide_external_invocation,
         query_marketplace,
         select_external,
     )
 
-    # Print every SSE-bound event as JSONL to stdout so `producer.external_decision.started`,
-    # `producer.marketplace.queried`, `producer.external_agent.selected`, `payment.*`,
-    # `producer.memory.applied`, `producer.selecting.*`, and `agent.pitching.*` all show up
-    # in the CLI smoke test. The api-storage component will replace this sink with an HTTP/SSE one.
-    subscribe(JsonlSink())
+    # Print every SSE-bound event as an indented key-per-line tree to stdout so
+    # `producer.external_decision.started`, `producer.marketplace.queried`,
+    # `producer.external_agent.selected`, `payment.*`, `producer.memory.applied`,
+    # `producer.selecting.*`, and `agent.pitching.*` all surface readably in the
+    # CLI smoke test. The api-storage component will swap this for an HTTP/SSE
+    # JSONL sink.
+    subscribe(PrettySink())
 
     parser = argparse.ArgumentParser(
         description="Run one episode generation pass and print EpisodeScript JSON."
@@ -253,22 +268,26 @@ def cli_main(argv: list[str] | None = None) -> int:
         help="Skip external pitch round (Phase 2 escape hatch)",
     )
     parser.add_argument(
-        "--weather", action="store_true",
+        "--weather",
+        action="store_true",
         help="Activate the Weather agent (requires weather_location.json; "
-             "auth flow runs automatically if missing)",
+        "auth flow runs automatically if missing)",
     )
     parser.add_argument(
-        "--calendar", action="store_true",
+        "--calendar",
+        action="store_true",
         help="Activate the Calendar agent (requires Google OAuth; "
-             "auth flow runs automatically if missing)",
+        "auth flow runs automatically if missing)",
     )
     parser.add_argument(
-        "--youtube", action="store_true",
+        "--youtube",
+        action="store_true",
         help="Activate the YouTube agent (requires YouTube Data API OAuth; "
-             "auth flow runs automatically if missing)",
+        "auth flow runs automatically if missing)",
     )
     parser.add_argument(
-        "--no-export", action="store_true",
+        "--no-export",
+        action="store_true",
         help="Skip ffmpeg concat step at end of run (dev iteration).",
     )
     args = parser.parse_args(argv)
@@ -276,7 +295,21 @@ def cli_main(argv: list[str] | None = None) -> int:
     if args.no_llm:
         os.environ["DISABLE_LLM"] = "1"
 
-    print(f"[orchestrator] Running episode for user_id={args.user_id!r} …\n")
+    from storage.episode_artifacts import (
+        save_bonus,
+        save_brief,
+        save_episode_script,
+        save_guaranteed,
+        save_opener,
+        save_pitches,
+        save_running_order,
+        save_segment,
+        save_sign_off,
+    )
+    from storage.episode_dir import new_episode_id
+
+    episode_id = new_episode_id()
+    print(f"[orchestrator] Episode {episode_id} | user={args.user_id}\n")
 
     # ── Internal pitch round ─────────────────────────────────────────
     agent_names = _select_internal_agent_classes(
@@ -297,9 +330,12 @@ def cli_main(argv: list[str] | None = None) -> int:
 
     hydrated_weights = hydrate_producer_memory(args.user_id)
     if hydrated_weights:
-        print(f"[learning] hydrated ProducerMemory from feedback log — agent_weights:")
-        for agent, w in sorted(hydrated_weights.items()):
-            print(f"  {agent:<10} {w:.3f}")
+        weights_str = ", ".join(
+            f"{a}={w:.2f}" for a, w in sorted(hydrated_weights.items())
+        )
+        print(f"[setup]  Learning hydration   {weights_str}")
+    else:
+        print(f"[setup]  Learning hydration   bootstrap (no prior signals)")
 
     from agents.calendar.agent import CalendarAgent
     from agents.weather.agent import WeatherAgent
@@ -313,31 +349,58 @@ def cli_main(argv: list[str] | None = None) -> int:
     internal_agents = [_CLASS_BY_NAME[n]() for n in agent_names]
 
     pitches_by_agent, brief = run_episode(internal_agents, user_id=args.user_id)
+    save_brief(episode_id, dict(brief))
+
+    tc = brief["today_context"]
+    cal_events = tc.get("calendar_events") or []
+    cal_summary = f"{len(cal_events)} events" if cal_events else "0 events"
+    wx_summary = tc.get("weather_summary") or "n/a"
+    date_str = tc.get("date", "?")
+    dow_str = (tc.get("day_of_week") or "?")[:3]
+    tod_str = tc.get("time_of_day", "?")
+    print(
+        f"\n[1/8] Brief assembled      "
+        f"date={date_str} {dow_str} {tod_str}, "
+        f"weather={wx_summary}, calendar={cal_summary}"
+    )
 
     # ── Producer external decision → marketplace → payment → external pitch ──
+    external_line: str | None = None
     if not args.no_external:
         decision = decide_external_invocation(pitches_by_agent)
-        emit("producer.external_decision.started", {
-            "reason": "anti_cocoon_policy_v0",
-            "reasoning_summary": decision["rationale"],
-        })
+        emit(
+            "producer.external_decision.started",
+            {
+                "reason": "anti_cocoon_policy_v0",
+                "reasoning_summary": decision["rationale"],
+            },
+        )
         if decision["decision"] == "invoke":
             candidates = query_marketplace()
-            emit("producer.marketplace.queried", {
-                "candidates": [
-                    {"handle": c["handle"], "display_name": c["display_name"],
-                     "price_usdc": c["price_usdc"]}
-                    for c in candidates
-                ],
-                "reasoning_summary": f"{len(candidates)} candidates available",
-            })
+            emit(
+                "producer.marketplace.queried",
+                {
+                    "candidates": [
+                        {
+                            "handle": c["handle"],
+                            "display_name": c["display_name"],
+                            "price_usdc": c["price_usdc"],
+                        }
+                        for c in candidates
+                    ],
+                    "reasoning_summary": f"{len(candidates)} candidates available",
+                },
+            )
             chosen = select_external(candidates, brief=brief)
-            emit("producer.external_agent.selected", {
-                "agent": chosen["handle"],
-                "display_name": chosen["display_name"],
-                "rationale": "expands topic diversity for this brief",
-                "reasoning_summary": f"picked {chosen['handle']}",
-            })
+            emit(
+                "producer.external_agent.selected",
+                {
+                    "agent": chosen["handle"],
+                    "display_name": chosen["display_name"],
+                    "rationale": "expands topic diversity for this brief",
+                    "reasoning_summary": f"picked {chosen['handle']}",
+                },
+            )
 
             # ── Agentic payment (mocked) ────────────────────────────
             tx = initiate_tx(
@@ -345,16 +408,22 @@ def cli_main(argv: list[str] | None = None) -> int:
                 to_wallet=chosen["wallet_address"],
                 amount_usdc=chosen["price_usdc"],
             )
-            emit("payment.initiated", {
-                "to": chosen["wallet_address"],
-                "amount_usdc": chosen["price_usdc"],
-                "mode_badge": tx["mode"],
-            })
-            emit("payment.confirmed", {
-                "tx_hash": tx["tx_hash"],
-                "basescan_url": tx["basescan_url"],
-                "mode_badge": tx["mode"],
-            })
+            emit(
+                "payment.initiated",
+                {
+                    "to": chosen["wallet_address"],
+                    "amount_usdc": chosen["price_usdc"],
+                    "mode_badge": tx["mode"],
+                },
+            )
+            emit(
+                "payment.confirmed",
+                {
+                    "tx_hash": tx["tx_hash"],
+                    "basescan_url": tx["basescan_url"],
+                    "mode_badge": tx["mode"],
+                },
+            )
 
             # ── External pitch round ────────────────────────────────
             from agents.alices.agent import AlicesAgent
@@ -365,22 +434,21 @@ def cli_main(argv: list[str] | None = None) -> int:
                 user_id=args.user_id,
             )
             pitches_by_agent.update(external_pitches)
-
-    # ── Display per-agent pitches ────────────────────────────────────
-    for agent_name, pitches in pitches_by_agent.items():
-        print(f"── {agent_name} ({len(pitches)} pitch{'es' if len(pitches) != 1 else ''}) ──")
-        for p in pitches:
-            print(f"  [{p['priority']:.4f}] {p['title']}")
-            print(f"          claim_kind={p['claim_kind']}  provenance={p['provenance_shape']}")
-            hook_display = (
-                f"          hook: {p['hook'][:90]}…"
-                if len(p['hook']) > 90
-                else f"          hook: {p['hook']}"
+            external_line = (
+                f"invoked {chosen['handle']} "
+                f"(${chosen['price_usdc']:.2f} USDC, tx={tx['tx_hash'][:10]}…)"
             )
-            print(hook_display)
-        print()
 
-    # ── Step 0.5 + 1 + 1.5 + 2 (memory → guaranteed → bonus → script) ─
+    pitches_summary = "  ".join(
+        f"{a}={len(ps)}" for a, ps in sorted(pitches_by_agent.items())
+    )
+    print(f"\n[2/8] Pitches collected    {pitches_summary}")
+    if external_line:
+        print(f"         External agent    {external_line}")
+
+    save_pitches(episode_id, pitches_by_agent)
+
+    # ── Step 0.5 + 1 + 1.5 (memory → guaranteed → bonus) ─
     from producer.bonus import select_bonus_with_events
     from producer.memory import (
         apply_producer_memory,
@@ -393,113 +461,258 @@ def cli_main(argv: list[str] | None = None) -> int:
     raw_pitches_by_agent = pitches_by_agent
     pitches_by_agent = apply_producer_memory(pitches_by_agent, producer_memory)
     emit_memory_applied(producer_memory, raw_pitches_by_agent, pitches_by_agent)
+    save_pitches(episode_id, pitches_by_agent, post_memory=True)
+
+    mem_weights = producer_memory.get("agent_weights", {}) if producer_memory else {}
+    if mem_weights:
+        mem_summary = ", ".join(f"{a}={w:.2f}" for a, w in sorted(mem_weights.items()))
+    else:
+        mem_summary = "identity transform (bootstrap)"
+    print(f"\n[3/8] Producer memory      {mem_summary}")
 
     order, remaining, bonus_budget = select_guaranteed_slots(pitches_by_agent)
-    print(f"── Guaranteed slots ({order['guaranteed_count']}; {bonus_budget}s bonus budget) ──")
-    for p in order["segments"]:
-        print(f"  [{p['agent']}] {p['title']} ({p['suggested_length_sec']}s)")
-    print()
+    save_guaranteed(episode_id, order["segments"], bonus_budget)
+    print(
+        f"\n[4/8] Guaranteed slots     "
+        f"{order['guaranteed_count']} slots, {bonus_budget}s bonus budget"
+    )
 
-    bonus, _guaranteed_reasons = select_bonus_with_events(
+    bonus, guaranteed_reasons = select_bonus_with_events(
         guaranteed_slots=order["segments"],
         remaining_pitches=remaining,
         budget_remaining_sec=bonus_budget,
         today_context=brief["today_context"],
     )
+    # Pull overall_reasoning from the selection call's SSE payload is awkward —
+    # select_bonus_with_events already emitted. Re-derive from the outer call
+    # instead by calling the lower-level function again just for the string is
+    # wasteful; just record what we have.
+    save_bonus(
+        episode_id,
+        bonus,
+        guaranteed_reasons,
+        overall_reasoning="(see producer.selecting.started SSE event)",
+    )
     order = append_bonus(order, bonus)
     selected = order["segments"]
-    print(f"── Bonus slots ({len(bonus)}) ──")
-    for p in bonus:
-        print(
-            f"  [{p['agent']}] {p['title']} ({p['suggested_length_sec']}s) "
-            f"— {p.get('reasoning_summary', '')}"
+    save_running_order(episode_id, selected, order["guaranteed_count"])
+
+    total_sec = sum(s["suggested_length_sec"] for s in selected)
+    print(
+        f"\n[5/8] Bonus selection      "
+        f"{len(bonus)} bonus picked → {len(selected)} segments, {total_sec}s total"
+    )
+    from producer.script import split_opener_inputs
+
+    opener_wx, opener_cal, content_after_opener = split_opener_inputs(selected)
+    opener_sources = [p for p in (opener_wx, opener_cal) if p]
+    if content_after_opener:
+        opener_sources.append(content_after_opener[0])
+    if opener_sources:
+        opener_label_parts = [
+            {"weather": "wx", "calendar": "cal"}.get(p["agent"], p["agent"])
+            for p in opener_sources
+        ]
+        opener_secs = sum(p["suggested_length_sec"] for p in opener_sources)
+        opener_label = f"[opener:{'+'.join(opener_label_parts)}/{opener_secs}s]"
+        tail = "  ".join(
+            f"[{p['agent']}/{p['suggested_length_sec']}s]"
+            for p in content_after_opener[1:]
         )
-    print()
+        running_summary = f"{opener_label}  {tail}".rstrip()
+    else:
+        running_summary = "  ".join(
+            f"[{s['agent']}/{s['suggested_length_sec']}s]" for s in selected
+        )
+    print(f"\n[6/8] Running order        {running_summary}")
 
     if args.no_llm:
-        print("[orchestrator] --no-llm: skipping Producer script generation.")
-        print(json.dumps(selected, indent=2))
-    elif os.environ.get("ELEVENLABS_API_KEY"):
-        import asyncio
-        from pipeline import run_episode_pipeline
-        from storage.episode_dir import new_episode_id
+        print("\n[7/8] Script generation    skipped (--no-llm)")
+        print(f"\n[8/8] Audio export         skipped (--no-llm)")
+        print(f"\nArtifacts: data/episodes/{episode_id}/")
+        _print_learning_preview(args.user_id, hydrated_weights)
+        return 0
 
-        print("[orchestrator] Running full pipeline (script + audio) …\n")
-        try:
-            episode_id = new_episode_id()
-            print(f"[orchestrator] episode_id = {episode_id}")
+    # ── Step 2: script generation (inline so we can capture artifacts) ──
+    import asyncio
+    from producer.script import (
+        SegmentScript,
+        build_opener_payload,
+        build_segment_payload,
+        build_sign_off_payload,
+        generate_opener,
+        generate_segment,
+        generate_sign_off,
+        split_opener_inputs,
+    )
 
-            result = asyncio.run(run_episode_pipeline(selected, brief, episode_id))
-            print(f"── Opener ──\n{result.opener}\n")
+    try:
+        weather_pitch, calendar_pitch, content_pitches = split_opener_inputs(selected)
+        if not content_pitches:
+            raise ValueError(
+                "no content pitches after opener split "
+                "(running order was weather/calendar only)"
+            )
 
-            if result.audio.episode_failed is not None:
-                print(f"\n[audio] episode failed: {result.audio.episode_failed.reason}")
-            if result.audio.skipped_segments:
-                print(f"\n[audio] skipped segments: {result.audio.skipped_segments}")
+        async def _run_script() -> tuple[str, list[SegmentScript], str]:
+            opener_payload = build_opener_payload(
+                weather_pitch, calendar_pitch, content_pitches[0], brief
+            )
+            opener_text = await generate_opener(
+                weather_pitch, calendar_pitch, content_pitches[0], brief
+            )
+            save_opener(episode_id, opener_payload, opener_text)
 
-            # Build the segment view the player expects. Pull pitch_title from
-            # `selected` (the producer-selected pitches, same order as audio segments).
-            player_segments = [
-                {
-                    "segment_index": seg_result["segment_index"],
-                    "agent": selected[seg_result["segment_index"]]["agent"],
-                    "pitch_title": selected[seg_result["segment_index"]]["title"],
-                    "url": seg_result["url"],
-                }
-                for seg_result in result.audio.segment_results
+            segs: list[SegmentScript] = []
+            for i, pitch in enumerate(content_pitches):
+                is_first = i == 0
+                seg_payload = build_segment_payload(pitch, brief, is_first)
+                seg = await generate_segment(pitch, brief, is_first=is_first)
+                save_segment(episode_id, i, seg_payload, dict(seg))
+                segs.append(seg)
+
+            so_payload = build_sign_off_payload(brief)
+            so_text = await generate_sign_off(brief)
+            save_sign_off(episode_id, so_payload, so_text)
+            return opener_text, segs, so_text
+
+        opener, content_segments, sign_off = asyncio.run(_run_script())
+
+        episode_script = {
+            "opener": opener,
+            "segments": [dict(s) for s in content_segments],
+            "sign_off": sign_off,
+        }
+        save_episode_script(episode_id, episode_script)
+
+        seg_breakdown = "  ".join(
+            f"seg{i+1} {s['estimated_length_sec']}s"
+            for i, s in enumerate(content_segments)
+        )
+        print(
+            f"\n[7/8] Script generation    "
+            f"opener {len(opener.split())}w  {seg_breakdown}  "
+            f"sign-off {len(sign_off.split())}w"
+        )
+    except Exception as e:
+        print(f"\n[7/8] Script generation    FAILED: {e}")
+        print(f"\nArtifacts: data/episodes/{episode_id}/")
+        _print_learning_preview(args.user_id, hydrated_weights)
+        return 1
+
+    # ── Step 3: audio ──
+    if not os.environ.get("ELEVENLABS_API_KEY"):
+        print(f"\n[8/8] Audio export         skipped (no ELEVENLABS_API_KEY)")
+        print(f"\nArtifacts: data/episodes/{episode_id}/")
+        _print_learning_preview(args.user_id, hydrated_weights)
+        return 0
+
+    # Audio generation consumes content_segments, not the full EpisodeScript.
+    # Replays the same content segments back through audio (cache-idempotent).
+    try:
+        from audio.orchestrator import generate_episode_audio
+        from audio.tts import TTSClient
+
+        tts = TTSClient(api_key=os.environ["ELEVENLABS_API_KEY"])
+
+        async def _run_audio():
+            from producer.script import SegmentScript as _SegScript
+
+            # Full playback order: opener → content segments → sign_off.
+            # agent="narrator" falls back to NARRATOR_VOICE_ID in audio.config.VOICE_MAP.
+            all_segs = [
+                _SegScript(
+                    agent="narrator",
+                    pitch_title="opener",
+                    segue_in="",
+                    script=opener,
+                    estimated_length_sec=75,
+                ),
+                *content_segments,
+                _SegScript(
+                    agent="narrator",
+                    pitch_title="sign_off",
+                    segue_in="",
+                    script=sign_off,
+                    estimated_length_sec=12,
+                ),
             ]
 
-            # Feedback sink: append to per-episode JSONL under ./data/signals/{user}/.
-            from dataclasses import asdict
-            from player.cli_player import FeedbackSignal, play_episode
-            from storage.signals import append_signal
+            async def _seg_iter():
+                for s in all_segs:
+                    yield s
 
-            async def _on_feedback(sig: FeedbackSignal) -> None:
-                append_signal(args.user_id, episode_id, asdict(sig))
+            return await generate_episode_audio(tts, _seg_iter(), episode_id)
 
-            print("\n── Playback ── (l=like  s=skip  r=repeat  p=pause  q=quit) ──")
-            asyncio.run(play_episode(
+        audio_result = asyncio.run(_run_audio())
+
+        mp3_count = len(audio_result.segment_results)
+        print(
+            f"\n[8/8] Audio export         "
+            f"data/episodes/{episode_id}/ ({mp3_count} segments)"
+        )
+
+        # Auto-export concat MP3 unless --no-export.
+        if not args.no_export:
+            from storage.export import concat_episode_mp3
+
+            try:
+                out = concat_episode_mp3(episode_id)
+                print(f"         Concat MP3         {out}")
+            except RuntimeError as e:
+                print(f"         Concat MP3         FAILED: {e}")
+
+        # Playback (interactive).
+        from dataclasses import asdict
+        from player.cli_player import FeedbackSignal, play_episode
+        from storage.signals import append_signal
+
+        async def _on_feedback(sig: FeedbackSignal) -> None:
+            append_signal(args.user_id, episode_id, asdict(sig))
+
+        # Build index → (agent, title): 0=opener, 1..N=content, N+1=sign_off.
+        # Explicit map avoids the stale selected[index] lookup that misaligned
+        # when weather/calendar occupy the early slots of the running order.
+        _index_map: dict[int, tuple[str, str]] = {0: ("narrator", "opener")}
+        for _ci, _pitch in enumerate(content_pitches):
+            _index_map[_ci + 1] = (_pitch["agent"], _pitch["title"])
+        _index_map[len(content_pitches) + 1] = ("narrator", "sign_off")
+
+        player_segments = [
+            {
+                "segment_index": sr["segment_index"],
+                "agent": _index_map.get(sr["segment_index"], ("unknown", ""))[0],
+                "pitch_title": _index_map.get(sr["segment_index"], ("unknown", ""))[1],
+                "url": sr["audio_path"],
+            }
+            for sr in audio_result.segment_results
+        ]
+
+        print(f"\nArtifacts: data/episodes/{episode_id}/")
+        print("\n── Playback ── (l=like  s=skip  r=repeat  p=pause  q=quit) ──")
+        asyncio.run(
+            play_episode(
                 segments=player_segments,
                 user_id=args.user_id,
                 episode_id=episode_id,
                 on_feedback=_on_feedback,
-            ))
+            )
+        )
+    except Exception as e:
+        print(f"\n[8/8] Audio export         FAILED: {e}")
+        print(f"\nArtifacts: data/episodes/{episode_id}/")
 
-            # Auto-export concat MP3 unless --no-export.
-            if not args.no_export:
-                from storage.export import concat_episode_mp3
-                try:
-                    out = concat_episode_mp3(episode_id)
-                    print(f"\n[export] judge-handoff MP3 → {out}")
-                except RuntimeError as e:
-                    print(f"\n[export] failed: {e}")
-                    print(f"[export] individual segments still available under "
-                          f"./data/episodes/{episode_id}/")
+    _print_learning_preview(args.user_id, hydrated_weights)
+    return 0
 
-            print(f"\n── Sign-off ──\n{result.sign_off}\n")
-        except Exception as e:
-            print(f"[orchestrator] Pipeline failed: {e}")
-            print("[orchestrator] Falling back to raw segment JSON.")
-            print(json.dumps(selected, indent=2))
-    else:
-        from producer.script import generate_episode_script
 
-        print("[orchestrator] No ELEVENLABS_API_KEY — script-only mode.\n")
-        try:
-            episode = generate_episode_script(selected, brief)
-            print(json.dumps(episode, indent=2))
-        except Exception as e:
-            print(f"[orchestrator] Producer LLM failed: {e}")
-            print("[orchestrator] Falling back to raw segment JSON.")
-            print(json.dumps(selected, indent=2))
-
-    # End-of-run learning preview: summarize what the newly-appended signals
-    # would yield on the NEXT run. Visible-to-demonstrator so they can narrate
-    # "watch how episode 2 re-orders the lineup."
+def _print_learning_preview(user_id: str, hydrated_weights: dict) -> None:
+    """Summarize how the just-logged signals would re-seed ProducerMemory."""
     print("\n── Learning signals logged — next run will re-seed ProducerMemory ──")
     from learning_loop.seed_from_feedback import compute_weights
     from storage.signals import iter_signals
-    post_run_weights = compute_weights(list(iter_signals(args.user_id)))
+
+    post_run_weights = compute_weights(list(iter_signals(user_id)))
     if post_run_weights:
         print(f"[learning] next-run agent_weights:")
         for agent, w in sorted(post_run_weights.items()):
@@ -508,8 +721,6 @@ def cli_main(argv: list[str] | None = None) -> int:
             print(f"  {agent:<10} {prev:.3f} → {w:.3f}  {arrow}")
     else:
         print("[learning] no learning signals captured this episode.")
-
-    return 0
 
 
 if __name__ == "__main__":
