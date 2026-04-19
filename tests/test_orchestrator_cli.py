@@ -102,8 +102,10 @@ def test_cli_main_hydrates_producer_memory_at_startup(monkeypatch):
     import agents.orchestrator as orch
 
     calls: list[str] = []
+    # Patch the module-level binding (not the source module) so the stub
+    # is stable across any future import-ordering changes.
     monkeypatch.setattr(
-        "learning_loop.seed_from_feedback.hydrate_producer_memory",
+        orch, "hydrate_producer_memory",
         lambda user_id: (calls.append(user_id), {})[1],
     )
     monkeypatch.setattr(orch, "ensure_agent_auth", lambda _n: None)

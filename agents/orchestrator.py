@@ -38,6 +38,10 @@ from agents.protocol import (
 # cleanly. No circular import risk — auth.preflight only does its (lazy)
 # agent-module imports at call time.
 from auth.preflight import ensure_agent_auth
+# Same rationale — module-level binding so tests can monkeypatch
+# `agents.orchestrator.hydrate_producer_memory` directly rather than
+# relying on sys.modules side effects from patching the source module.
+from learning_loop.seed_from_feedback import hydrate_producer_memory
 
 if TYPE_CHECKING:
     pass
@@ -291,7 +295,6 @@ def cli_main(argv: list[str] | None = None) -> int:
     for name in agent_names:
         ensure_agent_auth(name)
 
-    from learning_loop.seed_from_feedback import hydrate_producer_memory
     hydrated_weights = hydrate_producer_memory(args.user_id)
     if hydrated_weights:
         print(f"[learning] hydrated ProducerMemory from feedback log — agent_weights:")
