@@ -1,6 +1,7 @@
 """Spec: docs/specs/2026-04-18-v0-cli-pivot-plan.md Addendum Task 2S.1"""
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 from storage.episode_dir import episode_dir, new_episode_id
@@ -10,6 +11,9 @@ def test_new_episode_id_is_uuid_format():
     eid = new_episode_id()
     assert len(eid) == 36
     assert eid.count("-") == 4
+    # Pin v4 specifically — a regression to uuid.uuid1 (leaks MAC + time)
+    # would pass the length/hyphen checks but fail this version assert.
+    assert uuid.UUID(eid).version == 4
 
 
 def test_new_episode_id_is_unique():
