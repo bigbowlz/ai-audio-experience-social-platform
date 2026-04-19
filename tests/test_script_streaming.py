@@ -243,3 +243,74 @@ class TestGenerateSegmentMultiBlockParse:
         seg = await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
         assert "research_outcome" not in seg
         assert set(seg.keys()) == {"agent", "pitch_title", "segue_in", "script", "estimated_length_sec"}
+
+
+from producer.events import EventBus, set_default_bus
+
+
+class TestResearchFallbackTelemetry:
+    @pytest.mark.asyncio
+    async def test_hook_fallback_emits_event(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
+        bus = EventBus()
+        captured: list[tuple[str, dict]] = []
+        bus.subscribe(lambda n, p: captured.append((n, p)))
+        set_default_bus(bus)
+        try:
+            def fake_create(**kwargs):
+                return _resp_text(_segment_json(
+                    pitch_title="yt", script="x" * 50,
+                    research_outcome="hook_fallback",
+                ))
+
+            monkeypatch.setattr("producer.script._client.messages.create", fake_create)
+            await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
+        finally:
+            set_default_bus(EventBus())
+
+        events = [(n, p) for n, p in captured
+                  if n == "producer.segment.research_fallback"]
+        assert len(events) == 1
+        name, payload = events[0]
+        assert payload["agent"] == "youtube"
+        assert payload["pitch_title"] == "yt"
+        assert "reason" in payload  # "empty_search" | "broadened_empty"
+
+    @pytest.mark.asyncio
+    async def test_story_outcome_does_not_emit_event(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
+        bus = EventBus()
+        captured: list[tuple[str, dict]] = []
+        bus.subscribe(lambda n, p: captured.append((n, p)))
+        set_default_bus(bus)
+        try:
+            def fake_create(**kwargs):
+                return _resp_text(_segment_json(
+                    pitch_title="yt", script="x" * 50, research_outcome="story",
+                ))
+            monkeypatch.setattr("producer.script._client.messages.create", fake_create)
+            await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
+        finally:
+            set_default_bus(EventBus())
+
+        events = [n for n, _ in captured if n == "producer.segment.research_fallback"]
+        assert events == []
+
+    @pytest.mark.asyncio
+    async def test_hook_fallback_still_enforces_min_script_floor(
+        self, monkeypatch, tmp_path
+    ):
+        """Spec invariant: _MIN_SCRIPT_CHARS (20) still applies to hook-fallback output."""
+        monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
+
+        def fake_create(**kwargs):
+            return _resp_text(_segment_json(
+                pitch_title="yt",
+                script="too short.",  # 10 chars
+                research_outcome="hook_fallback",
+            ))
+
+        monkeypatch.setattr("producer.script._client.messages.create", fake_create)
+
+        with pytest.raises(ValueError, match="too short"):
+            await generate_segment(_pitch("youtube", "yt"), _brief(), is_first=True)
