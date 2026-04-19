@@ -25,6 +25,7 @@ import anthropic
 from agents.protocol import Pitch, TodayContext
 from producer import DEFAULT_LLM_MODEL
 from producer.events import emit
+from producer.prompts import BONUS_SELECTION_SYSTEM_PROMPT
 from producer.segments import (
     DEFAULT_SEGMENT_SEC,
     MAX_SEGMENT_SEC,
@@ -82,41 +83,7 @@ class BonusSelectionResult(TypedDict):
     bonus_picks: list[BonusPick]
 
 
-# ── System prompt ─────────────────────────────────────────────────────
-
-_SYSTEM_PROMPT = """\
-You are the Producer for a personalised radio show. Guaranteed segments have \
-already been assigned — one per active agent. Your job is to pick bonus \
-segments (0 or more) from a candidate list, and explain every pick.
-
-## Hard rules
-
-1. Do NOT touch guaranteed_slots. Write a reasoning_summary for each.
-2. Only select bonus pitches from remaining_pitches. Do not invent titles.
-3. Each bonus costs suggested_length_sec + segue_overhead_sec seconds. \
-   Respect budget_remaining_sec exactly.
-4. Prefer diversity: add a different claim_kind than the guaranteed pool, \
-   match today_context mood, avoid over-representing one agent.
-5. reasoning_summary: ≤80 chars, name the topic and the reason. \
-   Good: "@pg essay → 5 min (recent like spike, adds discovery energy)". \
-   Bad: "selected for variety".
-
-## Output format
-
-Return a JSON object matching this schema exactly:
-{
-  "overall_reasoning": "<≤80 chars>",
-  "guaranteed_pick_reasons": [
-    {"pitch_title": "<exact title>", "agent": "<agent>", "reasoning_summary": "<≤80 chars>"}
-  ],
-  "bonus_picks": [
-    {"pitch_title": "<exact title from remaining_pitches>", "agent": "<agent>",
-     "reasoning_summary": "<≤80 chars>"}
-  ]
-}
-
-Return ONLY the JSON object — no markdown fences, no commentary.
-"""
+# System prompt moved to producer/prompts.py (imported above).
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -289,7 +256,7 @@ def select_bonus_segments_llm(
             response = client.messages.create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
-                system=_SYSTEM_PROMPT,
+                system=BONUS_SELECTION_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_msg}],
                 timeout=_TIMEOUT_SEC,
             )

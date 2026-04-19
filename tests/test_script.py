@@ -200,11 +200,20 @@ class TestSystemPrompt:
         # The LLM-self-report field is gone; search usage is observed, not claimed.
         assert "research_outcome" not in SYSTEM_PROMPT
 
-    def test_forbids_explicit_bridge(self):
-        """Prompt forbids 'because you watched X, here's Y' explicit bridges."""
+    def test_encourages_source_refs_personalization(self):
+        """Prompt now encourages referencing source_refs for personalization,
+        while preserving claim_kind discipline on temporal framing.
+
+        Earlier spec forbade explicit bridges; the post-2026-04-19 design
+        reverses that — listener channel/video names are the substrate of
+        real personalization and should be referenced where they sharpen
+        the tie. claim_kind still bounds what claims the takeaway can make.
+        """
+        assert "Personalization via `source_refs`" in SYSTEM_PROMPT
         prompt_lower = SYSTEM_PROMPT.lower()
-        # One of these signal phrases must appear in the forbidden-patterns section.
-        assert "explicit bridge" in prompt_lower or "because you watched" in prompt_lower
+        assert "encouraged" in prompt_lower
+        # claim_kind discipline preserved — no invented durability claims.
+        assert "you've been into x" in prompt_lower
 
 
 # ── Group C: validation assertions ────────────────────────────────────

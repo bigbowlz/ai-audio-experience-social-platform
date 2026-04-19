@@ -117,7 +117,7 @@ class CreatorAgentListing(TypedDict):
     """
 
     handle: str  # "@GoddamnAxl"
-    display_name: str  # "Alice's Lens"
+    display_name: str  # "External Lens"
     scope: str  # human-readable scope description
     price_usdc: float  # demo: 0.10
     wallet_address: str  # Base Sepolia address

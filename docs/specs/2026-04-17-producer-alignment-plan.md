@@ -120,7 +120,7 @@ def test_external_decision_skip_shape():
 def test_creator_agent_listing_shape():
     listing: CreatorAgentListing = {
         "handle": "@GoddamnAxl",
-        "display_name": "Alice's Lens",
+        "display_name": "External Lens",
         "scope": "tech / startup culture",
         "price_usdc": 0.10,
         "wallet_address": "0x8043AeeD92c681492B13f46e91EFb8B42D18E3b2",
@@ -172,7 +172,7 @@ class CreatorAgentListing(TypedDict):
     v0 reads a hardcoded list. v1 queries a real marketplace.
     """
     handle: str                        # "@GoddamnAxl"
-    display_name: str                  # "Alice's Lens"
+    display_name: str                  # "External Lens"
     scope: str                         # human-readable scope description
     price_usdc: float                  # demo: 0.10
     wallet_address: str                # Base Sepolia address
@@ -1387,7 +1387,7 @@ from agents.protocol import (
 _MARKETPLACE_V0: list[CreatorAgentListing] = [
     {
         "handle": "@GoddamnAxl",
-        "display_name": "Alice's Lens",
+        "display_name": "External Lens",
         "scope": "tech / startup culture",
         "price_usdc": 0.10,
         "wallet_address": "0x8043AeeD92c681492B13f46e91EFb8B42D18E3b2",
