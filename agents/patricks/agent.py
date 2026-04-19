@@ -57,6 +57,7 @@ MIN_PITCHES = 3
 
 # ── Data loader ──────────────────────────────────────────────────────
 
+
 def _load_data(
     data_dir: Path,
 ) -> tuple[list[dict], list[dict], dict[str, list[str]], dict[str, list[str]]]:
@@ -92,14 +93,16 @@ def _load_data(
 
 # ── Deterministic candidate selection ────────────────────────────────
 
+
 def _top_n_seeded(score: dict[str, float], n: int, seed: tuple) -> list[str]:
     rng = random.Random(str(seed))
     keyed = [(v, rng.random(), k) for k, v in score.items()]
     keyed.sort(reverse=True)
-    return [k for _, _, k in keyed[:min(n, len(keyed))]]
+    return [k for _, _, k in keyed[: min(n, len(keyed))]]
 
 
 # ── Template hook generation (fallback) ──────────────────────────────
+
 
 def _topic_label(topic: str) -> str:
     return topic.replace("-", " ")
@@ -146,7 +149,7 @@ def _template_hook(
 
     return (
         f"WHAT: Curator recommendation on {label} (claim_kind={claim_kind.value}) — {evidence}.\n"
-        f"SOURCE: @AlicesLens (external curator, pre-captured Day-0 data) — NOT the listener's own interest.\n"
+        f"SOURCE: @GoddamnAxl (external curator, pre-captured Day-0 data) — NOT the listener's own interest.\n"
         f"GOAL: Expose the listener to Alice's taste. "
         f"Narrate as curator pick ('Alice's been into X', 'Alice flagged Y'), "
         f"never as listener taste ('you've been into X'). "
@@ -156,6 +159,7 @@ def _template_hook(
 
 # ── Thin-signal pitch ────────────────────────────────────────────────
 
+
 def _thin_signal_pitch() -> Pitch:
     return Pitch(
         agent="alices",
@@ -163,7 +167,7 @@ def _thin_signal_pitch() -> Pitch:
         hook=(
             "WHAT: General-interest curator segment in Alice's domain (photography, travel, tech). "
             "No specific topic ranking available.\n"
-            "SOURCE: @AlicesLens (external curator, pre-captured Day-0 data) — NOT the listener's own interest.\n"
+            "SOURCE: @GoddamnAxl (external curator, pre-captured Day-0 data) — NOT the listener's own interest.\n"
             "GOAL: Write a general-interest segment framed as Alice's curator voice. "
             "Do not personalize to the listener; no channels/subs/videos by name."
         ),
@@ -177,11 +181,12 @@ def _thin_signal_pitch() -> Pitch:
 
 # ── AlicesAgent ────────────────────────────────────────────────────
 
+
 class AlicesAgent:
     """External creator agent backed by Alice's pre-captured YouTube data."""
 
     name: str = "alices"
-    display_name: str = "@AlicesLens"
+    display_name: str = "@GoddamnAxl"
     scope: str = "Alice's YouTube world — photography, travel, tech"
     external: bool = True
     price_usdc: float | None = 0.10
@@ -222,21 +227,23 @@ class AlicesAgent:
         bundle = []
         for t in candidates:
             provenance = profile["topic_provenance"].get(t, [])
-            bundle.append({
-                "topic": t,
-                "score": score[t],
-                "long_term": profile["long_term_topic_scores"].get(t, 0.0),
-                "recent": profile["recent_topic_scores"].get(t, 0.0),
-                "provenance": provenance,
-                "claim_kind": compute_claim_kind(
-                    t,
-                    profile["long_term_topic_scores"],
-                    profile["recent_topic_scores"],
-                    provenance,
-                    profile["stats"]["total_recent_weight"],
-                ),
-                "provenance_shape": compute_provenance_shape(provenance),
-            })
+            bundle.append(
+                {
+                    "topic": t,
+                    "score": score[t],
+                    "long_term": profile["long_term_topic_scores"].get(t, 0.0),
+                    "recent": profile["recent_topic_scores"].get(t, 0.0),
+                    "provenance": provenance,
+                    "claim_kind": compute_claim_kind(
+                        t,
+                        profile["long_term_topic_scores"],
+                        profile["recent_topic_scores"],
+                        provenance,
+                        profile["stats"]["total_recent_weight"],
+                    ),
+                    "provenance_shape": compute_provenance_shape(provenance),
+                }
+            )
 
         if len(bundle) < MIN_PITCHES:
             return [_thin_signal_pitch()]
@@ -248,10 +255,14 @@ class AlicesAgent:
                 return pitches
             log.warning(
                 "LLM returned %d pitches (expected %d–%d), falling back to templates",
-                len(pitches), MIN_PITCHES, MAX_PITCHES,
+                len(pitches),
+                MIN_PITCHES,
+                MAX_PITCHES,
             )
         except Exception:
-            log.warning("LLM hook generation failed, falling back to templates", exc_info=True)
+            log.warning(
+                "LLM hook generation failed, falling back to templates", exc_info=True
+            )
 
         # ── Fallback: template hooks ─────────────────────────────────
         n_pitches = min(MAX_PITCHES, len(bundle))
@@ -273,15 +284,17 @@ class AlicesAgent:
                 elif c["video_id"]:
                     source_refs.append(c["video_id"])
 
-            pitches_fallback.append(Pitch(
-                agent="alices",
-                title=_topic_label(topic).title(),
-                hook=hook,
-                source_refs=list(dict.fromkeys(source_refs)),
-                priority=min(1.0, round(item["score"], 4)),
-                thin_signal=False,
-                claim_kind=claim_kind.value,
-                provenance_shape=prov_shape.value,
-            ))
+            pitches_fallback.append(
+                Pitch(
+                    agent="alices",
+                    title=_topic_label(topic).title(),
+                    hook=hook,
+                    source_refs=list(dict.fromkeys(source_refs)),
+                    priority=min(1.0, round(item["score"], 4)),
+                    thin_signal=False,
+                    claim_kind=claim_kind.value,
+                    provenance_shape=prov_shape.value,
+                )
+            )
 
         return pitches_fallback

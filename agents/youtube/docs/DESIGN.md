@@ -390,7 +390,7 @@ The two L1-normalized windows (`long_term_topic_scores`, `recent_topic_scores`) 
 **Formula:**
 
 ```python
-BLEND_HALF_SATURATION_K = 5.0     # tunable; "W at which recent and long-term weigh equally"
+BLEND_HALF_SATURATION_K = 100.0   # tunable; "W at which recent and long-term weigh equally"
 
 W = stats["total_recent_weight"]  # unbounded, ≥ 0
 α = W / (W + BLEND_HALF_SATURATION_K)
@@ -411,19 +411,20 @@ if s > 0:
 
 `combined` is L1-normalized in all cases by the safety-net step. (Pre-renormalize sums: 1 when both windows non-empty; `α` when long-term empty; `(1-α)` when recent empty; 0 when both empty → returns `{}`.)
 
-**α-curve at a glance (`k=5`):**
+**α-curve at a glance (`k=100`):**
 
-| W (`total_recent_weight`) | Signal                | α     | Blend behavior        |
-| ------------------------- | --------------------- | ----- | --------------------- |
-| 0.1                       | 1 very old like       | 0.02  | essentially long-term |
-| 1.0                       | few old likes         | 0.17  | long-term dominant    |
-| 5.0                       | ~5 fresh likes        | 0.50  | balanced              |
-| 15.0                      | ~15 fresh likes (dev) | 0.75  | recent-favored        |
-| 30.0+                     | very active user      | 0.86+ | recent dominant       |
+| W (`total_recent_weight`)  | Signal                        | α     | Blend behavior        |
+| -------------------------- | ----------------------------- | ----- | --------------------- |
+| 0.1                        | 1 very old like               | 0.001 | essentially long-term |
+| 5.0                        | ~5 fresh likes                | 0.048 | long-term dominant    |
+| 17.0                       | dev/patrick probes (observed) | 0.145 | long-term dominant    |
+| 50.0                       | very active recent stretch    | 0.333 | long-term favored     |
+| 100.0                      | balanced point                | 0.500 | balanced              |
+| 300.0+                     | extreme recent activity       | 0.750+| recent-favored        |
 
 **Why saturating (`W/(W+k)`) over linear or thresholded:** bounded to `[0, 1]` without a cap cliff, single-knob tunable, zero-signal falls out naturally (`W=0 → α=0 → combined = long_term`), and the half-saturation point has an intuitive meaning (`k` = "how many fresh likes until recent carries equal weight").
 
-**Why `k=5`:** empirically matched against dev's probe — `W≈15` for an active user should be recent-dominant (α=0.75) but not total (α<1). Placing `k=5` puts the balanced point at ~5 fresh likes, which is a reasonable "enough to trust" threshold. Tune when multi-user data arrives.
+**Why `k=100`** (retuned 2026-04-19, previously `k=5`)**:** the [K-sweep balance check](../../../docs/specs/2026-04-19-k-sweep-balance-check.md) on committed probe data showed `k=5` (α≈0.77 at `W≈17`) produced a top-8 candidate pool that was 6/8 music for dev's YouTube probe — the liked-videos window skewed heavily toward music subgenres and dominated the blend. `k=100` drops α to ≈0.15 at the same `W`, restoring a subs-dominant blend that hits the ≤3/8 music balance target for the YouTube pool. The balanced point (α=0.5) now sits at `W=100` — interpretable as "100 fresh-equivalent likes before recent carries equal weight". Retune when live multi-user data arrives. Alices' pool stays at 3/8 music at every `k` in the sweep — his concentration is topic-level structural, not blend-driven; see §V1+ open questions.
 
 **Why keep raw `long_term_topic_scores` + `recent_topic_scores` alongside `combined_topic_scores`:** the blend compresses the temporal-divergence signal (which topics are _rising_ vs _durable_) that narrative layers want. Pitch-time LLM prompts can still read both windows directly when they need to say "you've been getting into jazz lately" (requires `recent[jazz] >> long_term[jazz]`) — the combined score is for ranking, the raw windows are for narrative.
 
@@ -484,6 +485,7 @@ def pitch(brief: Brief, memory: AgentMemory, context: ScopeContext,
 
 - **Input-bounded.** Candidates bundle + brief. **No external search, no web fetch, no agentic loop.** Content discovery (fresh articles, new videos, world news) is Producer's job, not the agent's. The agent knows the user; Producer knows the world. For the full rationale on why this boundary limits hallucination surface, see [`agents/docs/DESIGN.md` §Two-LLM boundary](../../docs/DESIGN.md#two-llm-boundary-why-agents-pitch-and-producer-scripts-decided-2026-04-16).
 - **Constraint: pick from the candidate set.** The LLM re-ranks, writes hooks, and selects 3–5, but cannot invent topics outside `bundle`. Otherwise the algo layer is decorative and the deterministic demo beat is undermined.
+- **Title shape rule (2026-04-19).** Titles must include at least one concrete topical anchor — a genre, era, named public artist or work, decade span, or recognizable sub-movement. Titles drive the downstream producer web_search; poetic / vibes-only titles like "Classics Meet New Anthems" or curator labels like "Alice's Classical Picks" return generic think-piece content and produce factless segments. Titles are producer-internal handles, never spoken — favor searchability over radio flair. Enforced in both `YOUTUBE_SYSTEM_PROMPT` and `PATRICKS_SYSTEM_PROMPT`. See [docs/specs/2026-04-19-prompt-and-cli-polish.md §N3](../../../docs/specs/2026-04-19-prompt-and-cli-polish.md#n3--title-shape-rule--generic-trend-fallback).
 - **Output contract (clarified 2026-04-15, revised 2026-04-16).** Either **3–5 topic `Pitch` objects** with `title`, `hook`, `priority ∈ [0, 1]`, `source_refs` (human-readable channel names / video titles drawn from the topic's provenance, for downstream Producer LLM grounding — not opaque YouTube IDs), **or exactly 1 thin-signal `Pitch`**. **Never any other cardinality.** Thin-signal is emitted in two cases: (1) `combined_topic_scores` is empty (zero-subs zero-likes user, or first-ever episode where API failure left `profile_state` empty), or (2) fewer than 3 candidates survive the algo step (profile is non-empty but too sparse for ranked topic pitches — e.g., a user with only 1–2 unique topics after TF-IDF). The sparse-topic guard enforces the 3-pitch floor structurally rather than letting the LLM attempt to fill 3 slots from insufficient candidates. Producer is responsible for handling the 1-pitch thin-signal case in its running-order assembly (e.g., let other agents fill the slot, or play a "let me learn about you" segment).
 
 **Why this split:**
@@ -626,6 +628,7 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
 - **Explicit onboarding taste elicitation.** "Pick 3–5 channels you've been especially into lately" question at first-run to boost cold-start recency signal. Additive, non-blocking, skippable.
 - **User-delete endpoint.** Cascade-delete OAuth tokens + `AgentMemory` on user request; topic-tag cache survives (cross-user public metadata, not PII). Required for v1 public launch. Out of scope for v0 demo.
 - **Social-graph features ("see what a friend is into") need a different acquisition path.** The `LL` (liked videos) playlist via `playlistItems.list` is accessible only for the authenticated user's own account, not for arbitrary users. v1+ social features cannot reuse the v0 acquisition layer for non-self accounts; the extractor stays portable, but a social-graph acquisition adapter (likely public-channel-only, no likes) would need separate design.
+- **Category-level diversity in candidate selection.** The 2026-04-19 K retune (5 → 100) fixed blend-driven music concentration in YouTube's top-8 pool, but the [K-sweep](../../../docs/specs/2026-04-19-k-sweep-balance-check.md) surfaced a finding the blend can't fix: alices' top-8 contains exactly 3 music topics at every `k` in `[0.5, 500]` — his subs and likes independently cluster on music at the topic level. For structural-concentration cases, the right lever is inside candidate selection (`_top_n_seeded`), not the blend: a per-coarse-category cap (e.g. ≤⌊N/3⌋ music out of top-N), or taxonomy-aware diversification against the `topicCategories` Level-1 roots. Parked to v1 when multi-agent diversity across many creators matters more than v0's four-agent demo.
 
 ## Dependencies on other components
 
