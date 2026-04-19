@@ -184,7 +184,12 @@ def _run_pitch_round(
 
 # ── CLI ───────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
+def cli_main(argv: list[str] | None = None) -> int:
+    """CLI entry point. Returns process exit code.
+
+    argv=None → argparse reads sys.argv. Passing argv enables unit tests
+    without monkeypatching sys.argv.
+    """
     import argparse
 
     from payment.stub import initiate_tx
@@ -211,7 +216,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Skip external pitch round (Phase 2 escape hatch)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.no_llm:
         os.environ["DISABLE_LLM"] = "1"
@@ -367,3 +372,9 @@ if __name__ == "__main__":
             print(f"[orchestrator] Producer LLM failed: {e}")
             print("[orchestrator] Falling back to raw segment JSON.")
             print(json.dumps(selected, indent=2))
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(cli_main())
