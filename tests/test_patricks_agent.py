@@ -22,26 +22,31 @@ class TestAgentMetadata:
 
     def test_name(self):
         from agents.alices.agent import AlicesAgent
+
         agent = AlicesAgent()
         assert agent.name == "alices"
 
     def test_display_name(self):
         from agents.alices.agent import AlicesAgent
+
         agent = AlicesAgent()
-        assert agent.display_name == "@AlicesLens"
+        assert agent.display_name == "@GoddamnAxl"
 
     def test_external(self):
         from agents.alices.agent import AlicesAgent
+
         agent = AlicesAgent()
         assert agent.external is True
 
     def test_price_usdc(self):
         from agents.alices.agent import AlicesAgent
+
         agent = AlicesAgent()
         assert agent.price_usdc == 0.10
 
     def test_wallet_address_set(self):
         from agents.alices.agent import AlicesAgent
+
         agent = AlicesAgent()
         assert agent.wallet_address is not None
         assert agent.wallet_address.startswith("0x")
@@ -49,6 +54,7 @@ class TestAgentMetadata:
     def test_satisfies_data_agent_protocol(self):
         from agents.alices.agent import AlicesAgent
         from agents.protocol import DataAgent
+
         agent = AlicesAgent()
         assert isinstance(agent, DataAgent)
 
@@ -61,6 +67,7 @@ class TestFetchContext:
 
     def test_returns_profile(self):
         from agents.alices.agent import AlicesAgent
+
         agent = AlicesAgent()
         ctx = agent.fetch_context("user1")
         assert "profile" in ctx
@@ -75,6 +82,7 @@ class TestFetchContext:
     def test_profile_has_topics(self):
         """Alice has 709 subs + 260 likes — profile should have topics."""
         from agents.alices.agent import AlicesAgent
+
         agent = AlicesAgent()
         ctx = agent.fetch_context("user1")
         profile = ctx["profile"]
@@ -83,6 +91,7 @@ class TestFetchContext:
 
     def test_profile_scores_l1_normalized(self):
         from agents.alices.agent import AlicesAgent
+
         agent = AlicesAgent()
         ctx = agent.fetch_context("user1")
         profile = ctx["profile"]
@@ -111,6 +120,7 @@ class TestPitch:
     def test_returns_3_to_5_pitches(self):
         from agents.alices.agent import AlicesAgent
         from agents.protocol import bootstrap_memory
+
         agent = AlicesAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
@@ -119,6 +129,7 @@ class TestPitch:
     def test_all_pitches_have_agent_alices(self):
         from agents.alices.agent import AlicesAgent
         from agents.protocol import bootstrap_memory
+
         agent = AlicesAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
@@ -128,6 +139,7 @@ class TestPitch:
     def test_pitch_fields_complete(self):
         from agents.alices.agent import AlicesAgent
         from agents.protocol import bootstrap_memory
+
         agent = AlicesAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
@@ -143,6 +155,7 @@ class TestPitch:
     def test_priority_in_range(self):
         from agents.alices.agent import AlicesAgent
         from agents.protocol import bootstrap_memory
+
         agent = AlicesAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
@@ -152,6 +165,7 @@ class TestPitch:
     def test_valid_claim_kind(self):
         from agents.alices.agent import AlicesAgent
         from agents.protocol import bootstrap_memory
+
         agent = AlicesAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
@@ -162,6 +176,7 @@ class TestPitch:
     def test_valid_provenance_shape(self):
         from agents.alices.agent import AlicesAgent
         from agents.protocol import bootstrap_memory
+
         agent = AlicesAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
@@ -173,6 +188,7 @@ class TestPitch:
         """Alice has plenty of data — should never be thin-signal."""
         from agents.alices.agent import AlicesAgent
         from agents.protocol import bootstrap_memory
+
         agent = AlicesAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
@@ -182,6 +198,7 @@ class TestPitch:
     def test_source_refs_are_strings(self):
         from agents.alices.agent import AlicesAgent
         from agents.protocol import bootstrap_memory
+
         agent = AlicesAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
@@ -201,5 +218,6 @@ class TestLlmAgentName:
         """generate_pitches should accept agent_name kwarg."""
         import inspect
         from agents.youtube.llm import generate_pitches
+
         sig = inspect.signature(generate_pitches)
         assert "agent_name" in sig.parameters

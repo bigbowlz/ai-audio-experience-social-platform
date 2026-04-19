@@ -3,6 +3,7 @@
 Spec: producer/docs/DESIGN.md §Interface contract
       docs/specs/2026-04-17-producer-alignment-plan.md Phase 2
 """
+
 from __future__ import annotations
 
 from producer.external import (
@@ -23,17 +24,22 @@ def test_query_marketplace_returns_hardcoded_listings():
     listings = query_marketplace()
     assert len(listings) >= 1
     handles = {l["handle"] for l in listings}
-    assert "@AlicesLens" in handles
+    assert "@GoddamnAxl" in handles
 
 
 def test_select_external_returns_alices_in_v0():
     listings = query_marketplace()
-    chosen = select_external(listings, brief={
-        "today_context": {
-            "date": "2026-04-17", "day_of_week": "Thursday",
-            "time_of_day": "morning", "weather_summary": None,
-            "calendar_events": None,
-        }
-    })
-    assert chosen["handle"] == "@AlicesLens"
+    chosen = select_external(
+        listings,
+        brief={
+            "today_context": {
+                "date": "2026-04-17",
+                "day_of_week": "Thursday",
+                "time_of_day": "morning",
+                "weather_summary": None,
+                "calendar_events": None,
+            }
+        },
+    )
+    assert chosen["handle"] == "@GoddamnAxl"
     assert chosen["price_usdc"] == 0.10

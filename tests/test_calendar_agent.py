@@ -32,7 +32,11 @@ class TestFetchContext:
                 "summary": "Team standup",
                 "start": {"dateTime": "2026-04-16T10:00:00+08:00"},
                 "end": {"dateTime": "2026-04-16T10:30:00+08:00"},
-                "attendees": [{"email": "a@x.com"}, {"email": "b@x.com"}],
+                "attendees": [
+                    {"email": "a@x.com", "displayName": "Alex Chen"},
+                    {"email": "b@x.com", "displayName": "Bo Liu"},
+                    {"email": "c@x.com"},  # no displayName, should be dropped
+                ],
                 "recurringEventId": "abc123",
                 "conferenceData": {"entryPoints": [{"entryPointType": "video"}]},
                 "organizer": {"displayName": "Alex Chen"},
@@ -54,7 +58,8 @@ class TestFetchContext:
         assert rich[0]["start"] == "10:00"
         assert rich[0]["end"] == "10:30"
         assert rich[0]["duration_min"] == 30
-        assert rich[0]["attendee_count"] == 2
+        assert rich[0]["attendee_count"] == 3
+        assert rich[0]["attendees"] == ["Alex Chen", "Bo Liu"]
         assert rich[0]["is_recurring"] is True
         assert rich[0]["has_video_call"] is True
         assert rich[0]["organizer"] == "Alex Chen"
@@ -164,6 +169,7 @@ class TestFetchContext:
 
         rich = ctx["calendar_events_rich"]
         assert rich[0]["attendee_count"] == 0
+        assert rich[0]["attendees"] == []
         assert rich[0]["is_recurring"] is False
         assert rich[0]["has_video_call"] is False
         assert rich[0]["organizer"] == ""

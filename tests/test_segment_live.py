@@ -3,7 +3,7 @@
 Skipped unless RUN_LIVE_LLM=1. Writes its artifact under
 tmp/test_outputs/segment_scripts/ via RADIO_CACHE_DIR=tmp/test_outputs/ so the
 user can open the file after the run and audit the segue_in, script body,
-research_outcome, and raw_llm_text the model produced.
+search_tool_calls, search_queries, and raw_llm_text the model produced.
 
 Spec: docs/specs/2026-04-18-producer-news-narration-design.md §3 Test posture.
 
@@ -79,7 +79,11 @@ async def test_generate_segment_writes_inspectable_artifact(tmp_path):
     After the test passes, open the file at the asserted path and audit:
     - `segment.segue_in` is empty (is_first=True) or ≤6 words.
     - `segment.script` reads like a news story, not a listener-data restatement.
-    - `debug.research_outcome` is "story" (broadened search fell back to "hook_fallback").
+    - `debug.search_tool_calls` is 1 or 2 (observed web_search calls); 0 means
+      the model didn't search and fell back to hook narration.
+    - `debug.search_queries` lists the exact query strings the model used.
+    - `debug.fallback_path` is null on happy path; "repaired" or
+      "hook_narration" if parse recovery kicked in.
     - `debug.raw_llm_text` contains the model's raw JSON output.
     - Listener proper nouns ("National Geographic", "BBC Earth") do NOT appear
       in `segment.script` — the source-recitation rule must hold.
@@ -105,7 +109,10 @@ async def test_generate_segment_writes_inspectable_artifact(tmp_path):
     assert expected.exists(), f"artifact missing at {expected}"
     art = json.loads(expected.read_text(encoding="utf-8"))
     assert art["segment"]["pitch_title"] == "Underwater photography"
-    assert art["debug"]["research_outcome"] in ("story", "hook_fallback")
+    assert isinstance(art["debug"]["search_tool_calls"], int)
+    assert art["debug"]["search_tool_calls"] >= 0
+    assert isinstance(art["debug"]["search_queries"], list)
+    assert art["debug"]["fallback_path"] in (None, "repaired", "hook_narration")
     assert "raw_llm_text" in art["debug"]
     assert art["debug"]["input_pitch"]["title"] == "Underwater photography"
     print(f"\nLIVE ARTIFACT: {expected}")

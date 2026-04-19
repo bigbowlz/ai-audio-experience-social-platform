@@ -72,6 +72,12 @@ class TestTTSClientSynthesize:
         )
         assert result["segment_index"] == 0
         assert result["url"] == "/audio/ep1/segment_0.mp3"
+        # audio_path is the on-disk path the v0 CLI passes to afplay.
+        # Regression guard for "AudioFileOpen failed ('wht?')" bug where
+        # the web-route url was being handed to afplay verbatim.
+        expected_mp3 = Path(tmp_output_dir) / "ep1" / "segment_0.mp3"
+        assert result["audio_path"] == str(expected_mp3)
+        assert Path(result["audio_path"]).exists()
         assert isinstance(result["duration_ms"], int)
         assert isinstance(result["generation_time_ms"], int)
         assert result["character_count"] == len("Hello world")
