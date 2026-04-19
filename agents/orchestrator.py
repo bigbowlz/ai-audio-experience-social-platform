@@ -79,6 +79,34 @@ def _time_of_day(hour: int) -> str:
     return "night"
 
 
+# ── CLI helpers ──────────────────────────────────────────────────────
+
+_INTERNAL_AGENT_ORDER = ("weather", "calendar", "youtube")
+
+
+def _select_internal_agent_classes(
+    *, weather: bool, calendar: bool, youtube: bool
+) -> list[str]:
+    """Return the list of internal agent *names* activated by CLI flags.
+
+    Order is fixed (weather → calendar → youtube) to keep SSE/event
+    ordering deterministic across runs and to match the pre-pivot
+    hardcoded order. Zero flags raises SystemExit via parser.error
+    semantics — the CLI should print a helpful message.
+    """
+    names = [
+        n for n, on in zip(
+            _INTERNAL_AGENT_ORDER, (weather, calendar, youtube), strict=True,
+        ) if on
+    ]
+    if not names:
+        raise SystemExit(
+            "Select at least one agent: --weather, --calendar, --youtube "
+            "(use --help for details)."
+        )
+    return names
+
+
 # ── Orchestrator ──────────────────────────────────────────────────────
 
 def run_episode(
@@ -216,6 +244,25 @@ def cli_main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Skip external pitch round (Phase 2 escape hatch)",
     )
+    parser.add_argument(
+        "--weather", action="store_true",
+        help="Activate the Weather agent (requires weather_location.json; "
+             "auth flow runs automatically if missing)",
+    )
+    parser.add_argument(
+        "--calendar", action="store_true",
+        help="Activate the Calendar agent (requires Google OAuth; "
+             "auth flow runs automatically if missing)",
+    )
+    parser.add_argument(
+        "--youtube", action="store_true",
+        help="Activate the YouTube agent (requires YouTube Data API OAuth; "
+             "auth flow runs automatically if missing)",
+    )
+    parser.add_argument(
+        "--no-export", action="store_true",
+        help="Skip ffmpeg concat step at end of run (dev iteration).",
+    )
     args = parser.parse_args(argv)
 
     if args.no_llm:
@@ -228,7 +275,18 @@ def cli_main(argv: list[str] | None = None) -> int:
     from agents.weather.agent import WeatherAgent
     from agents.youtube.agent import YouTubeAgent
 
-    internal_agents = [WeatherAgent(), CalendarAgent(), YouTubeAgent()]
+    agent_names = _select_internal_agent_classes(
+        weather=args.weather,
+        calendar=args.calendar,
+        youtube=args.youtube,
+    )
+
+    _CLASS_BY_NAME = {
+        "weather": WeatherAgent,
+        "calendar": CalendarAgent,
+        "youtube": YouTubeAgent,
+    }
+    internal_agents = [_CLASS_BY_NAME[n]() for n in agent_names]
 
     pitches_by_agent, brief = run_episode(internal_agents, user_id=args.user_id)
 
