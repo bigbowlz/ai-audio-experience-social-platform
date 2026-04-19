@@ -12,10 +12,13 @@ Spec: agents/weather/docs/DESIGN.md
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+
+log = logging.getLogger(__name__)
 
 from agents.protocol import (
     AgentMemory,
@@ -468,7 +471,33 @@ def _parse_air_quality(resp: dict) -> dict:
 
 _FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 _AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
-_HTTP_TIMEOUT = 3.0
+_HTTP_TIMEOUT = 5.0
+_HTTP_RETRIES = 1
+
+
+def _get_json(client: httpx.Client, url: str, params: dict) -> dict | None:
+    """GET a JSON endpoint with one retry on httpx.HTTPError.
+
+    Returns parsed JSON on success, or None after all attempts fail. Each
+    attempt logs its own warning so intermittent failures leave a trace.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(_HTTP_RETRIES + 1):
+        try:
+            resp = client.get(url, params=params)
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPError as e:
+            last_exc = e
+            log.warning(
+                "Open-Meteo GET %s failed (attempt %d/%d): %s: %s",
+                url, attempt + 1, _HTTP_RETRIES + 1, type(e).__name__, e,
+            )
+    log.warning(
+        "Open-Meteo GET %s gave up after %d attempts (last error: %s)",
+        url, _HTTP_RETRIES + 1, last_exc,
+    )
+    return None
 
 
 class WeatherAgent:
@@ -520,20 +549,25 @@ class WeatherAgent:
 
         with httpx.Client(timeout=_HTTP_TIMEOUT) as client:
             # Forecast (required)
+            forecast_json = _get_json(client, _FORECAST_URL, forecast_params)
+            if forecast_json is None:
+                return {"weather_summary": None}  # type: ignore[return-value]
             try:
-                resp = client.get(_FORECAST_URL, params=forecast_params)
-                resp.raise_for_status()
-                weather_data = _parse_forecast(resp.json(), current_hour)
-            except (httpx.HTTPError, KeyError):
+                weather_data = _parse_forecast(forecast_json, current_hour)
+            except KeyError as e:
+                log.warning("Open-Meteo forecast response shape unexpected: missing %s", e)
                 return {"weather_summary": None}  # type: ignore[return-value]
 
             # Air quality (optional)
-            try:
-                resp = client.get(_AIR_QUALITY_URL, params=aq_params)
-                resp.raise_for_status()
-                air_quality = _parse_air_quality(resp.json())
-            except (httpx.HTTPError, KeyError):
+            aq_json = _get_json(client, _AIR_QUALITY_URL, aq_params)
+            if aq_json is None:
                 air_quality = None
+            else:
+                try:
+                    air_quality = _parse_air_quality(aq_json)
+                except KeyError as e:
+                    log.warning("Open-Meteo air-quality response shape unexpected: missing %s", e)
+                    air_quality = None
 
         weather_data["air_quality"] = air_quality
         facts = notable_facts(weather_data)
