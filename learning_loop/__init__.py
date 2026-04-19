@@ -46,6 +46,8 @@ from producer.memory import (
 
 __all__ = [
     "clear_seeds",
+    "compute_weights",
+    "hydrate_producer_memory",
     "load_agent_memory",
     "load_producer_memory",
     "seed_producer_memory",
@@ -150,3 +152,9 @@ def clear_seeds() -> None:
     """
     _seeded_agent_memory.clear()
     _seeded_producer_memory.clear()
+
+
+from learning_loop.seed_from_feedback import (  # noqa: E402, F401
+    compute_weights,
+    hydrate_producer_memory,
+)
