@@ -134,6 +134,11 @@ def _normalize_event(event: dict) -> tuple[str, dict] | None:
     start_raw = event.get("start", {})
     end_raw = event.get("end", {})
 
+    raw_attendees = event.get("attendees", [])
+    attendee_names = [
+        a["displayName"] for a in raw_attendees if a.get("displayName")
+    ]
+
     # All-day events use "date", timed events use "dateTime"
     is_all_day = "date" in start_raw and "dateTime" not in start_raw
 
@@ -145,7 +150,8 @@ def _normalize_event(event: dict) -> tuple[str, dict] | None:
                 "start": "all-day",
                 "end": "all-day",
                 "duration_min": 0,
-                "attendee_count": len(event.get("attendees", [])),
+                "attendee_count": len(raw_attendees),
+                "attendees": attendee_names,
                 "is_recurring": "recurringEventId" in event,
                 "has_video_call": "conferenceData" in event,
                 "organizer": event.get("organizer", {}).get("displayName", ""),
@@ -163,7 +169,8 @@ def _normalize_event(event: dict) -> tuple[str, dict] | None:
                 "start": start_time,
                 "end": end_time,
                 "duration_min": duration,
-                "attendee_count": len(event.get("attendees", [])),
+                "attendee_count": len(raw_attendees),
+                "attendees": attendee_names,
                 "is_recurring": "recurringEventId" in event,
                 "has_video_call": "conferenceData" in event,
                 "organizer": event.get("organizer", {}).get("displayName", ""),
@@ -264,6 +271,13 @@ class CalendarAgent:
         else:
             priority = 0.65
 
+        now_local = datetime.now().astimezone()
+        window_end = now_local + timedelta(hours=16)
+        window_fmt = (
+            f"rolling 16h window from {now_local.isoformat(timespec='minutes')} "
+            f"to {window_end.isoformat(timespec='minutes')}"
+        )
+
         if not api_reachable:
             hook = (
                 "WHAT: Schedule segment, degraded (Google Calendar unreachable).\n"
@@ -272,16 +286,19 @@ class CalendarAgent:
             )
         elif n == 0:
             hook = (
-                "WHAT: Schedule segment — 0 upcoming events in the next 16 hours.\n"
+                f"WHAT: Schedule preview — 0 events in the {window_fmt}. "
+                "This is a horizon view, not the full day.\n"
                 "SOURCE: Google Calendar (live OAuth, listener's primary calendar).\n"
-                "GOAL: Frame as an open day; no specific event to reference."
+                "GOAL: Report nothing on the immediate horizon; do not claim the full day is open."
             )
         else:
             hook = (
-                f"WHAT: Schedule segment — {n} upcoming event(s) in the next 16 hours.\n"
+                f"WHAT: Schedule preview — {n} event(s) in the {window_fmt}. "
+                "This is a horizon view, not the full day.\n"
                 "SOURCE: Google Calendar (live OAuth, listener's primary calendar).\n"
-                "GOAL: Orient the listener to today's shape before taste segments. "
-                "Use data.events as the content source; pick the single most narratively useful event to reference."
+                "GOAL: Orient the listener to the shape of the window before taste segments. "
+                "Use data.events as the content source; pick the single most narratively useful event to reference. "
+                "Describe only what's in the window — do not characterize hours beyond the window end."
             )
 
         return [
