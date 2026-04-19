@@ -69,6 +69,37 @@ def test_stop_terminates(monkeypatch):
     session.start()
     session.stop()
     fake_proc.terminate.assert_called_once()
+    # stop() must also reap via wait() so `is_running` transitions to False
+    # immediately. Task 2.3's q-keypress handler races this state check
+    # against keypress events; a stale `is_running is True` would mask the
+    # quit intent.
+    fake_proc.wait.assert_called()
+    assert session.is_running is False
+
+
+def test_stop_while_paused_sends_sigcont_before_terminate(monkeypatch):
+    """The hardest signal-ordering case: SIGSTOP'd process needs SIGCONT
+    before SIGTERM can reach the handler. Without this, stop() would
+    silently hang until the parent dies.
+    """
+    fake_proc = _fake_popen()
+    monkeypatch.setattr(
+        "player.playback.subprocess.Popen",
+        mock.Mock(return_value=fake_proc),
+    )
+
+    session = AfplaySession("/tmp/seg0.mp3")
+    session.start()
+    session.pause()
+    session.stop()
+
+    # Signal sequence observed on send_signal: SIGSTOP (from pause),
+    # then SIGCONT (from stop's unpause-before-terminate guard).
+    signal_calls = [c.args[0] for c in fake_proc.send_signal.call_args_list]
+    assert signal_calls == [signal.SIGSTOP, signal.SIGCONT]
+    fake_proc.terminate.assert_called_once()
+    assert session.is_paused is False
+    assert session.is_running is False
 
 
 def test_wait_blocks_until_proc_exits(monkeypatch):

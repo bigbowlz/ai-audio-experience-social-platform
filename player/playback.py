@@ -35,6 +35,10 @@ class AfplaySession:
         return self._proc is not None and self._proc.returncode is None
 
     def start(self) -> None:
+        if self.is_running:
+            # Double-start would leak the first subprocess without reaping it.
+            # Caller bug — fail loud rather than silently orphan a process.
+            raise RuntimeError("start() called on already-running session")
         if not Path(AFPLAY_PATH).exists():
             raise RuntimeError(
                 f"afplay not found at {AFPLAY_PATH}. v0 CLI playback is "
@@ -64,6 +68,11 @@ class AfplaySession:
             self._proc.send_signal(signal.SIGCONT)
             self._paused = False
         self._proc.terminate()
+        # Reap the process so `returncode` is populated; otherwise
+        # `is_running` would continue to report True until the OS delivers
+        # SIGTERM + the parent reaps — a ~10ms window where the async
+        # caller (Task 2.3's q-keypress handler) could race on stale state.
+        self._proc.wait()
 
     def wait(self, timeout: float | None = None) -> int:
         if self._proc is None:
