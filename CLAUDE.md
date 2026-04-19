@@ -67,6 +67,11 @@ Specific conflict resolutions:
 
 - **Time format:** All deterministic time output (narrative strings, fact summaries, log messages, timestamps) must use 24-hour format (e.g. `13:00`, not `1pm`).
 
+## Scope
+
+- v0 is CLI-only (`python -m agents.orchestrator --<agent> …`).
+  Webpage selection and frontend player are deferred to v1.
+
 ## Note
 
 This file intentionally stays short to avoid drift.
