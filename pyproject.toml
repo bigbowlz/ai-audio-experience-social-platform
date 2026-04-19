@@ -1,3 +1,6 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "live_llm: end-to-end test that makes real Anthropic + web_search calls. Skipped unless RUN_LIVE_LLM=1. Writes artifacts under $RADIO_CACHE_DIR.",
+]
