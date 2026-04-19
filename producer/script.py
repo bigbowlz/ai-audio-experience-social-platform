@@ -512,7 +512,14 @@ async def generate_segment(
             }
         ],
         messages=[{"role": "user", "content": user_msg}],
-        timeout=30.0,
+        tools=[
+            {
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": 2,
+            }
+        ],
+        timeout=40.0,
     )
 
     if not response.content or response.content[0].type != "text":
