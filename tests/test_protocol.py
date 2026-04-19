@@ -49,7 +49,7 @@ def test_external_decision_skip_shape():
 def test_creator_agent_listing_shape():
     listing: CreatorAgentListing = {
         "handle": "@GoddamnAxl",
-        "display_name": "Alice's Lens",
+        "display_name": "External Lens",
         "scope": "tech / startup culture",
         "price_usdc": 0.10,
         "wallet_address": "0x8043AeeD92c681492B13f46e91EFb8B42D18E3b2",
