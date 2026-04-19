@@ -25,6 +25,7 @@ Everything that turns a Script into listenable audio on the user's device:
 7. **Producer `write_script()` returns `list[SegmentScript]`, not an async iterator.** All segments are available at once, enabling parallel batch dispatch.
 
    **Resolved 2026-04-17 (decision 2a):** Producer now exposes `stream_episode_script(...) -> AsyncIterator[SegmentScript]` and audio's `generate_episode_audio` consumes the iterator directly. Segment 0 remains critical-path; 1-N fan out as the iterator yields, enabling producer↔audio parallelism. See `docs/specs/2026-04-17-producer-alignment-plan.md` Phase 3.
+
 8. **Budget:** $20 ElevenLabs pay-as-you-go (~320-400K chars, ~60-80 full episodes). Warn at 80% of verified budget.
 9. **Localhost-only (P4).** No CDN, no hosted audio. Per-segment MP3s served from local disk.
 
@@ -362,7 +363,7 @@ Per-class handling, same pattern as the youtube spec's `fetch_context()` failure
 - **Stability parameter:** tune during Day 2 rehearsal. Sample at `stability` 0.4, 0.6, 0.8. Higher = more consistent across segments, lower = more expressive but variable.
 - **Commit by:** Day 2 end of day.
 
-### Alice's voice (`@AlicesLens` guest voice)
+### Alice's voice (`@GoddamnAxl` guest voice)
 
 - **Selection:** a stock ElevenLabs voice. No cloning for v0.
 - **Strategy:** pick a voice with different gender, accent, or vocal register from narrator. Must be instantly distinguishable.
@@ -462,11 +463,11 @@ Creates `./exports/` directory on first use. Both `./data/episodes/` and `./expo
 
 ### Finalized (binding contracts)
 
-| Component                              | Relevance to audio                                                                                                                                                                                                                                                        | Status                   |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| `agents/youtube`                       | No direct dependency. Audio consumes script text, not agent output.                                                                                                                                                                                                       | Finalized (not relevant) |
-| `agents/docs/DESIGN.md`                | `Pitch` shape, `DataAgent` protocol. Not consumed directly by audio.                                                                                                                                                                                                      | Finalized (not relevant) |
-| `agents/docs/prompt_design.md`         | `EpisodeScript.segments[*].script` is the text audio consumes. Shape is defined here.                                                                                                                                                                                     | Finalized (binding)      |
+| Component                              | Relevance to audio                                                                                                                                                                                                                                                                                                                                            | Status                   |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `agents/youtube`                       | No direct dependency. Audio consumes script text, not agent output.                                                                                                                                                                                                                                                                                           | Finalized (not relevant) |
+| `agents/docs/DESIGN.md`                | `Pitch` shape, `DataAgent` protocol. Not consumed directly by audio.                                                                                                                                                                                                                                                                                          | Finalized (not relevant) |
+| `agents/docs/prompt_design.md`         | `EpisodeScript.segments[*].script` is the text audio consumes. Shape is defined here.                                                                                                                                                                                                                                                                         | Finalized (binding)      |
 | `producer` (via `prompt_design.md` §4) | `stream_episode_script()` yields `SegmentScript` per segment (`AsyncIterator`). Audio consumes the iterator via `generate_episode_audio`; segment 0 is critical path, segments 1-N fan out as they arrive. `generate_cold_open` / `generate_sign_off` are separate small calls composed by `pipeline.py`. `SegmentScript` shape locked in `prompt_design.md`. | Finalized (binding)      |
 
 ### Non-finalized (interfaces TBD when those components are designed)
@@ -501,7 +502,7 @@ Creates `./exports/` directory on first use. Both `./data/episodes/` and `./expo
   - Fix any audio quality issues found.
 
 - **Day 4: Alice's guest voice.**
-  - Pick stock ElevenLabs voice for `@AlicesLens` (distinct from narrator).
+  - Pick stock ElevenLabs voice for `@GoddamnAxl` (distinct from narrator).
   - Test opener + Alice segment in full rehearsal.
 
 - **Day 5 morning: Rehearsal + pronunciation tuning.**

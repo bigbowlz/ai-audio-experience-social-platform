@@ -39,7 +39,8 @@ _RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
 
 class SegmentResult(TypedDict):
     segment_index: int
-    url: str                    # "/audio/{episode_id}/segment_{segment_index}.mp3"
+    url: str                    # web route: "/audio/{episode_id}/segment_{segment_index}.mp3" (v1 frontend)
+    audio_path: str             # on-disk path afplay/ffmpeg can open (v0 CLI)
     duration_ms: int            # audio duration, parsed from MP3 header via mutagen
     duration_estimated: bool    # True if mutagen failed and duration was estimated
     generation_time_ms: int     # wall-clock TTS generation time
@@ -168,6 +169,7 @@ class TTSClient:
         return SegmentResult(
             segment_index=segment_index,
             url=f"/audio/{episode_id}/segment_{segment_index}.mp3",
+            audio_path=str(output_path),
             duration_ms=duration_ms,
             duration_estimated=estimated,
             generation_time_ms=gen_time_ms,
