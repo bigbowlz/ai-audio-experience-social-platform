@@ -168,7 +168,37 @@ def capture(session: AuthorizedSession, out_dir: Path) -> Path:
     return out_dir
 
 
-# ── Standalone entry point ───────────────────────────────────────────
+# ── OAuth + capture entry points ─────────────────────────────────────
+
+def oauth_and_capture(
+    out_dir: Path | None = None,
+    credentials_path: Path | None = None,
+) -> Path:
+    """Run the YouTube Data API OAuth flow and capture probe data.
+
+    Opens the browser for consent (and prints the authorization URL to
+    stdout as a fallback), fetches subscriptions/likes/topicDetails via
+    youtube.readonly, and writes the probe JSON files to out_dir.
+
+    Reused by preflight (auth/preflight.py::ensure_youtube_auth) and the
+    standalone CLI (main()). Keeps the three-line OAuth boilerplate in
+    one place.
+    """
+    from google_auth_oauthlib.flow import InstalledAppFlow  # noqa: PLC0415
+
+    out = Path(out_dir) if out_dir is not None else _DEFAULT_OUT
+    creds_file = Path(credentials_path) if credentials_path is not None else _CREDENTIALS
+    if not creds_file.exists():
+        raise FileNotFoundError(
+            f"YouTube OAuth client secrets not found: {creds_file}. "
+            "Set YOUTUBE_OAUTH_CLIENT_SECRET or place credentials at "
+            f"{_CREDENTIALS}."
+        )
+    flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), _SCOPES)
+    creds = flow.run_local_server(port=0)
+    session = AuthorizedSession(creds)
+    return capture(session, out)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Capture YouTube signals via OAuth")
@@ -181,13 +211,7 @@ def main() -> None:
         help=f"OAuth desktop client secrets JSON (default: {_CREDENTIALS})",
     )
     args = parser.parse_args()
-
-    from google_auth_oauthlib.flow import InstalledAppFlow  # noqa: PLC0415
-    flow = InstalledAppFlow.from_client_secrets_file(str(args.credentials), _SCOPES)
-    creds = flow.run_local_server(port=0)
-    session = AuthorizedSession(creds)
-
-    capture(session, args.out)
+    oauth_and_capture(out_dir=args.out, credentials_path=args.credentials)
 
 
 if __name__ == "__main__":
