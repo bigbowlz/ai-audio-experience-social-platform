@@ -17,7 +17,13 @@ _CONFIG_DIR = Path.home() / ".config" / "radio-podcast"
 _WEATHER_LOCATION_PATH = _CONFIG_DIR / "weather_location.json"
 _CALENDAR_TOKEN_PATH = _CONFIG_DIR / "calendar_token.json"
 
-_DEFAULT_YOUTUBE_PROBE_DIR = Path("tmp") / "ydata" / "probe_1776208130"
+# Anchor the YouTube probe default to the repo root so CWD doesn't matter —
+# `python -m agents.orchestrator --youtube` must point at the same dir whether
+# invoked from the repo root or elsewhere. Matches agents/youtube/agent.py:46
+# (which uses `Path(__file__).parents[2]` — agents/youtube/agent.py is two
+# levels down; here we're at auth/preflight.py so one .parent suffices).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_YOUTUBE_PROBE_DIR = _REPO_ROOT / "tmp" / "ydata" / "probe_1776208130"
 # Probe is considered "captured" when this file exists in the probe dir.
 # YouTubeAgent reads this file at agents/youtube/agent.py:68.
 _YOUTUBE_PROBE_SENTINEL = "02_subscriptions.json"
@@ -55,7 +61,7 @@ def ensure_calendar_auth() -> None:
         raise RuntimeError(
             "calendar auth did not complete — "
             f"{_CALENDAR_TOKEN_PATH} still missing. "
-            "Re-run `python auth/calendar_auth.py` manually to debug."
+            "Re-run `python -m auth.calendar_auth` manually to debug."
         )
 
 
@@ -80,7 +86,18 @@ def ensure_youtube_auth() -> None:
         f"launching YouTube OAuth + capture into {probe_dir} …"
     )
     import agents.youtube.capture as yt_capture
-    yt_capture.oauth_and_capture(out_dir=probe_dir)
+    try:
+        yt_capture.oauth_and_capture(out_dir=probe_dir)
+    except FileNotFoundError as e:
+        # Rewrap as RuntimeError so the CLI caller sees a consistent
+        # preflight-error type across all three agents. Preserve the
+        # original's message (it already names the missing credentials path).
+        raise RuntimeError(
+            f"youtube auth did not complete — credentials missing. "
+            f"{e} "
+            f"After placing the credentials file, re-run "
+            f"`python -m agents.youtube.capture --out {probe_dir}`."
+        ) from e
     if not sentinel.exists():
         raise RuntimeError(
             "youtube auth did not complete — "
