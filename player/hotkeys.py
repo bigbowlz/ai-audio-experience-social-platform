@@ -43,6 +43,12 @@ def raw_key_reader() -> Iterator[Iterator[KeyPress]]:
     Enters termios raw mode on __enter__, restores on __exit__ (even on
     exception). Inner iterator reads one char at a time via sys.stdin.read(1)
     and decodes via _KEY_MAP.
+
+    Requires a real TTY on stdin. If stdin is piped/redirected, the
+    `termios.tcgetattr()` call raises `termios.error: (25, 'Inappropriate
+    ioctl for device')` before the try block. The v0 CLI player is
+    interactive by design, so this is a caller-level precondition, not
+    a recoverable error — Task 2.3 does not attempt to recover.
     """
     fd = sys.stdin.fileno()
     saved = termios.tcgetattr(fd)
