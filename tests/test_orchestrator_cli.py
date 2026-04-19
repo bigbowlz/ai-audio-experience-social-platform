@@ -94,3 +94,30 @@ def test_cli_main_calls_preflight_once_per_active_agent(monkeypatch):
     # the preflight loop fires BEFORE load_producer_memory, so `calls` is
     # fully populated by the time the KeyError fires.
     assert calls == ["weather", "calendar"]
+
+
+def test_cli_main_hydrates_producer_memory_at_startup(monkeypatch):
+    """Hydration runs after preflight but before the banner."""
+    from unittest.mock import Mock
+    import agents.orchestrator as orch
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "learning_loop.seed_from_feedback.hydrate_producer_memory",
+        lambda user_id: (calls.append(user_id), {})[1],
+    )
+    monkeypatch.setattr(orch, "ensure_agent_auth", lambda _n: None)
+    monkeypatch.setattr(
+        orch, "run_episode",
+        lambda *a, **k: ({}, {"today_context": {}, "user_profile": None}),
+    )
+    monkeypatch.setattr("producer.events.subscribe", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "producer.memory.load_producer_memory",
+        Mock(side_effect=KeyError("stubbed — short-circuit after hydrate")),
+    )
+
+    with pytest.raises(KeyError, match="stubbed"):
+        orch.cli_main(["--weather", "--no-llm", "--no-external",
+                       "--user-id", "demo"])
+    assert calls == ["demo"]
