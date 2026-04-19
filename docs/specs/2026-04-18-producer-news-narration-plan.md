@@ -2,15 +2,26 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Post-implementation amendment (current state):** The plan below was implemented as described, then a subsequent refactor replaced the LLM-self-reported `research_outcome` signal with an OBSERVED one and added a JSON parse-failure fallback pipeline. Current authoritative state lives in [producer/docs/DESIGN.md](../../producer/docs/DESIGN.md). Key deltas from what this plan describes:
+>
+> - **No `research_outcome` field.** The LLM no longer declares "story" vs. "hook_fallback" in its JSON output. Instead, `generate_segment` counts `server_tool_use` blocks on the response via `_count_web_search_uses(response)`. `producer.segment.research_fallback` fires iff that count is zero (reason: `"no_search"`).
+> - **New JSON safety rules** in `SYSTEM_PROMPT`: escape `"` as `\"`, newlines as `\n`, backslashes as `\\`; prefer single quotes / em-dashes over nested double quotes in narration to avoid escaping bugs entirely.
+> - **Parse→repair→hook-narration fallback pipeline.** When the LLM returns malformed JSON, `_extract_json_object` tries tolerant brace-scan extraction; on failure `_repair_json_retry` makes one no-tools JSON-fix call; on failure `_hook_fallback_narration` makes a plain-prose LLM call and wraps the result into a `SegmentScript` in code. Broken raw text dumps to `$RADIO_CACHE_DIR/segment_scripts/_failed_{slug}_{ts}.txt`. A new event `producer.segment.parse_fallback` fires when either salvage layer runs (`variant: "repaired" | "hook_narration"`).
+> - **Debug artifact shape changed.** `{search_query, search_used, broadened, research_outcome}` was replaced by `{search_tool_calls, search_queries, fallback_path}`. `search_tool_calls` is an int count; `search_queries` lists the exact query strings the model sent; `fallback_path` is `null` / `"repaired"` / `"hook_narration"`.
+> - **Test artifacts renamed.** `test_has_research_outcome_output_field` → `test_has_json_safety_rules`. `test_strips_research_outcome_from_yielded_segment` → `test_yielded_segment_has_only_canonical_keys`. `TestResearchFallbackTelemetry` tests now mock `server_tool_use` blocks instead of LLM-self-reported fields.
+>
+> The rest of this plan — task breakdown, web_search tool plumbing, cache layer, `cannot-drop-segments` preservation, module docstring, live-test posture — all still describes the current system accurately. The task-by-task code snippets below illustrate the ORIGINAL plan, not the current code. Read this amendment first.
+
 **Goal:** Turn the Producer's YouTube/Alices segment narration from pattern-describing ("you've been into X") into real-world story narration via Anthropic's server-side `web_search` tool, with a same-day on-disk cache and a hook-narration fallback that preserves the `cannot-drop-segments` invariant.
 
-**Architecture:** Single `messages.create` call per segment gains a `web_search_20250305` tool block with `max_uses=2`. The segment LLM derives its own query from the pitch `title` (never from listener proper nouns), broadens once if empty, and falls back to hook-narration if still empty — all in one round trip. Timeout bumps 30s → 40s. A pretty-printed JSON artifact at `$RADIO_CACHE_DIR/segment_scripts/{agent}_{title_slug}_{YYYYMMDD}_{wpm}.json` is written on success (and is the manual-inspection surface for live-LLM tests); cache-hits return verbatim with no LLM call. A new JSON field `research_outcome: "story" | "hook_fallback"` on the LLM response is stripped before yield and drives a `producer.segment.research_fallback` telemetry event.
+**Architecture:** Single `messages.create` call per segment gains a `web_search_20250305` tool block with `max_uses=2`. The segment LLM derives its own query from the pitch `title` (never from listener proper nouns), broadens once if empty, and falls back to hook-narration if still empty — all in one round trip. Timeout bumps 30s → 40s. A pretty-printed JSON artifact at `$RADIO_CACHE_DIR/segment_scripts/{agent}_{title_slug}_{YYYYMMDD}_{wpm}.json` is written on success (and is the manual-inspection surface for live-LLM tests); cache-hits return verbatim with no LLM call. `producer.segment.research_fallback` telemetry fires when the primary response made zero `web_search` tool calls (observed from `server_tool_use` blocks, not LLM self-report — see amendment above).
 
 **Tech Stack:** Python 3.12+, `anthropic` SDK (server-side web_search tool), `pytest` + `pytest-asyncio`, producer's existing in-process event bus.
 
-**Scope boundary (spec §Implementation surface):** local to [producer/script.py](../../producer/script.py) plus one small `cache_dir()` accessor in [producer/__init__.py](../../producer/__init__.py). NO agent-code changes. NO opener / sign-off changes. NO selection-surface changes. Pacing telemetry (`producer.segment.pacing_measured`) is unchanged.
+**Scope boundary (spec §Implementation surface):** local to [producer/script.py](../../producer/script.py) plus one small `cache_dir()` accessor in [producer/**init**.py](../../producer/__init__.py). NO agent-code changes. NO opener / sign-off changes. NO selection-surface changes. Pacing telemetry (`producer.segment.pacing_measured`) is unchanged.
 
 **Hard constraints (from spec):**
+
 - `web_search` tool with `max_uses=2`, segment timeout 40s.
 - `cannot-drop-segments` preserved via hook-narration fallback (no segment dropping in v0).
 - `DISABLE_LLM=1` continues to raise `RuntimeError`; no offline path added.
@@ -25,15 +36,18 @@
 ## File structure
 
 **Created:**
+
 - `tmp/test_outputs/` — live-LLM test artifact dir (gitignored; created on first live test run via `RADIO_CACHE_DIR=tmp/test_outputs/`).
 
 **Modified:**
-- [producer/__init__.py](../../producer/__init__.py) — add `DEFAULT_CACHE_DIR` + `cache_dir()` accessor mirroring `words_per_min()`.
+
+- [producer/**init**.py](../../producer/__init__.py) — add `DEFAULT_CACHE_DIR` + `cache_dir()` accessor mirroring `words_per_min()`.
 - [producer/script.py](../../producer/script.py) — rewrite `SYSTEM_PROMPT`, update `generate_segment`, add cache internals (`_segment_cache_path`, `_read_cached_segment`, `_write_cached_artifact`, `_slug_title`), update module docstring.
 - [tests/test_script.py](../../tests/test_script.py) — add SYSTEM_PROMPT structural assertions for new contract; extend happy-path for `research_outcome` strip.
 - [tests/test_script_streaming.py](../../tests/test_script_streaming.py) — add async tests for tool block, timeout, multi-block parse, fallback event, cache read/write.
 
 **New test file:**
+
 - `tests/test_segment_cache.py` — unit tests for `cache_dir()`, `_segment_cache_path`, `_slug_title`, `_read_cached_segment`, `_write_cached_artifact`.
 - `tests/test_segment_live.py` — opt-in live-LLM end-to-end test (marked `@pytest.mark.live_llm`; skipped unless `RUN_LIVE_LLM=1`).
 
@@ -44,7 +58,8 @@
 ## Task 1: `cache_dir()` accessor in `producer/__init__.py`
 
 **Files:**
-- Modify: [producer/__init__.py](../../producer/__init__.py)
+
+- Modify: [producer/**init**.py](../../producer/__init__.py)
 - Test: `tests/test_segment_cache.py` (new)
 
 - [ ] **Step 1: Write the failing test**
@@ -96,7 +111,7 @@ Expected: FAIL with `ImportError: cannot import name 'DEFAULT_CACHE_DIR' from 'p
 
 - [ ] **Step 3: Write minimal implementation**
 
-Edit [producer/__init__.py](../../producer/__init__.py), append after the existing `words_per_min()` function:
+Edit [producer/**init**.py](../../producer/__init__.py), append after the existing `words_per_min()` function:
 
 ```python
 from pathlib import Path  # add near the top with the other imports
@@ -143,6 +158,7 @@ git commit -m "feat(producer): add cache_dir() accessor mirroring words_per_min(
 ## Task 2: Cache path helpers — `_slug_title` + `_segment_cache_path`
 
 **Files:**
+
 - Modify: [producer/script.py](../../producer/script.py) (add `_slug_title`, `_segment_cache_path` near the other private helpers).
 - Test: `tests/test_segment_cache.py`
 
@@ -257,6 +273,7 @@ git commit -m "feat(producer): add title-slug + segment cache path helpers"
 ## Task 3: `_read_cached_segment` + `_write_cached_artifact`
 
 **Files:**
+
 - Modify: [producer/script.py](../../producer/script.py)
 - Test: `tests/test_segment_cache.py`
 
@@ -449,6 +466,7 @@ git commit -m "feat(producer): add atomic cache read/write for segment artifacts
 ## Task 4: Rewrite `SYSTEM_PROMPT` for news-narration
 
 **Files:**
+
 - Modify: [producer/script.py](../../producer/script.py) — `SYSTEM_PROMPT` constant.
 - Test: [tests/test_script.py](../../tests/test_script.py) — extend `TestSystemPrompt`.
 
@@ -633,7 +651,7 @@ third-party news either way; provenance only colors the TAKEAWAY voice.
 - **youtube** — provenance is the LISTENER'S own data. Takeaway MAY use \
   second person sparingly — "the kind of story that rewards the \
   underwater-photography crowd". Never "you've been into X" style.
-- **alices** — provenance is an EXTERNAL CURATOR (@AlicesLens, \
+- **alices** — provenance is an EXTERNAL CURATOR (@GoddamnAxl, \
   pre-captured Day-0 data). Takeaway uses third person — "Alice" or \
   "Alice's lens" — never "you" about curator taste.
 - **weather** / **calendar** — environmental / schedule context. Narrated \
@@ -665,7 +683,9 @@ What you'll find in `data` per agent:
   (upcoming high/low/sunset), `data.notable_facts` (top 3 ranked \
   radio-interesting facts), `data.air_quality`, `data.location_name`.
 - **calendar** — `data.api_reachable` (bool), `data.events[]` with \
-  `summary`, `start`, `end`, `duration_min`, `attendee_count`, `is_recurring`, \
+  `summary`, `start`, `end`, `duration_min`, `attendee_count`, `attendees` \
+  (list of display names; may be shorter than `attendee_count` or empty when \
+  names aren't resolvable — never contains emails), `is_recurring`, \
   `has_video_call`, `organizer`.
 - **youtube** / **alices** — `data` is usually `{}`. The hook + \
   source_refs are the substrate. For taste segments in the research path, \
@@ -779,6 +799,7 @@ git commit -m "feat(producer): rewrite SYSTEM_PROMPT for news-narration via web_
 ## Task 5: Wire the `web_search` tool into `generate_segment` + bump timeout
 
 **Files:**
+
 - Modify: [producer/script.py](../../producer/script.py) — `generate_segment` body.
 - Test: [tests/test_script_streaming.py](../../tests/test_script_streaming.py).
 
@@ -920,6 +941,7 @@ git commit -m "feat(producer): add web_search tool to segment call, bump timeout
 ## Task 6: Parse multi-block responses + extract final JSON
 
 **Files:**
+
 - Modify: [producer/script.py](../../producer/script.py) — introduce `_extract_segment_json` helper; call it from `generate_segment`.
 - Test: [tests/test_script_streaming.py](../../tests/test_script_streaming.py).
 
@@ -1037,7 +1059,7 @@ def _extract_segment_text(response: object) -> str:
 
 Update `generate_segment` to use it and to strip `research_outcome` from the SegmentScript. Replace this block:
 
-```python
+````python
     if not response.content or response.content[0].type != "text":
         raise ValueError("LLM returned no text content")
     raw = response.content[0].text.strip()
@@ -1055,11 +1077,11 @@ Update `generate_segment` to use it and to strip `research_outcome` from the Seg
         script=data["script"],
         estimated_length_sec=data.get("estimated_length_sec", 60),
     )
-```
+````
 
 with:
 
-```python
+````python
     raw = _extract_segment_text(response)
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
@@ -1076,7 +1098,7 @@ with:
         script=data["script"],
         estimated_length_sec=data.get("estimated_length_sec", 60),
     )
-```
+````
 
 (The `research_outcome` variable is captured here for use in Task 7's fallback-telemetry emission; it is NOT written onto `seg`.)
 
@@ -1097,6 +1119,7 @@ git commit -m "feat(producer): parse multi-block LLM response; strip research_ou
 ## Task 7: Emit `producer.segment.research_fallback` telemetry on hook-narration
 
 **Files:**
+
 - Modify: [producer/script.py](../../producer/script.py) — `generate_segment` emits the event when `research_outcome == "hook_fallback"`.
 - Test: [tests/test_script_streaming.py](../../tests/test_script_streaming.py).
 
@@ -1219,6 +1242,7 @@ git commit -m "feat(producer): emit producer.segment.research_fallback on hook_f
 ## Task 8: Same-day cache read + write in `generate_segment`
 
 **Files:**
+
 - Modify: [producer/script.py](../../producer/script.py) — wrap the LLM call with cache read/write; emit cache telemetry.
 - Test: [tests/test_script_streaming.py](../../tests/test_script_streaming.py).
 
@@ -1367,7 +1391,7 @@ Expected: FAIL — no cache logic yet, the artifact file never appears, the LLM 
 
 Update `generate_segment` in [producer/script.py](../../producer/script.py). The full body becomes:
 
-```python
+````python
 async def generate_segment(
     segment: Pitch,
     brief: Brief,
@@ -1510,7 +1534,7 @@ async def generate_segment(
         )
 
     return seg
-```
+````
 
 Extract the post-build validation that the old body performed into a helper near the top of the module so both the cache-hit and LLM paths go through it:
 
@@ -1562,6 +1586,7 @@ git commit -m "feat(producer): same-day segment-script cache + cache_hit/cache_w
 ## Task 9: Live-LLM opt-in test
 
 **Files:**
+
 - Create: `tests/test_segment_live.py`
 - Modify: `pyproject.toml` — register the `live_llm` marker so `pytest --strict-markers` stays clean (the project does not currently use `--strict-markers` but registering is cheap insurance).
 
@@ -1732,21 +1757,28 @@ Expected: all assertions against `producer.segment.pacing_measured` pass. The ne
 - [ ] **Step 3: Run ONE live-LLM test end-to-end**
 
 Run:
+
 ```bash
 RUN_LIVE_LLM=1 pytest tests/test_segment_live.py -v -s
 ```
+
 Expected: PASS. Print output contains the artifact path.
 
 - [ ] **Step 4: Manually audit the artifact**
 
 Open the artifact file printed in Step 3, e.g.:
+
 ```
 tmp/test_outputs/segment_scripts/youtube_underwater_photography_20260418_130.json
 ```
+
 Confirm:
+
 - `segment.script` reads like a real news story (not a listener-data restatement).
 - No `National Geographic` or `BBC Earth` strings inside `segment.script`.
-- `debug.research_outcome == "story"` (or `"hook_fallback"` with a credible reason).
+- `debug.search_tool_calls` is 1 or 2 (the model actually searched); 0 means it fell back to hook narration.
+- `debug.search_queries` lists the exact queries sent to web_search.
+- `debug.fallback_path` is `null` on the happy path; `"repaired"` or `"hook_narration"` if parse recovery kicked in.
 - `debug.raw_llm_text` is present and matches the JSON that produced `segment`.
 
 Report the outcome to the user before closing the task.
@@ -1760,20 +1792,22 @@ Only commit if Step 4 surfaced a real prompt adjustment. If the artifact looks c
 ## Self-review checklist
 
 **Spec coverage:**
+
 - §1 Research mechanism — Task 5 (web_search tool block, max_uses=2).
 - §2 Query derivation — Task 4 (SYSTEM_PROMPT rules) + Task 5's payload-shape test pinning that no server-side query pre-concatenation exists.
 - §3 Cost & latency control — Task 5 (timeout), Task 8 (cache read/write), Task 9 (test posture writing under RADIO_CACHE_DIR).
-- §3 Artifact shape — Task 8's `debug` dict matches the spec's schema (search_query, search_used, broadened, research_outcome, raw_llm_text, input_pitch, target_words, words_per_minute).
+- §3 Artifact shape — Task 8's `debug` dict matches the current shape (search_tool_calls, search_queries, fallback_path, raw_llm_text, input_pitch, target_words, words_per_minute). Shape changed post-implementation; see amendment at top.
 - §3 title_slug normalization — Task 2 tests.
 - §3 Corrupted cache soft-fail — Task 3 tests.
 - §4 DISABLE_LLM unchanged — preserved in Task 8 rewrite; pre-existing test `test_generate_segment_raises_when_disable_llm_set` still runs.
 - §4 Module docstring update — Task 4 Step 3b.
-- §5 Broaden-then-fallback — SYSTEM_PROMPT (Task 4); research_outcome field (Task 4 + Task 7 event emission); `_MIN_SCRIPT_CHARS` floor preserved via `_validate_segment` (Task 8).
-- §5 Research_fallback telemetry — Task 7.
+- §5 Broaden-then-fallback — SYSTEM_PROMPT (Task 4); event emission (Task 4 + Task 7); `_MIN_SCRIPT_CHARS` floor preserved via `_validate_segment` (Task 8). Post-implementation, the emission trigger changed from the LLM-self-reported `research_outcome` field to an observed `server_tool_use` block count — see amendment at top.
+- §5 Research_fallback telemetry — Task 7; fires when `_count_web_search_uses(response) == 0`.
+- §5a Parse-failure fallback (post-implementation) — see amendment at top; not in the original plan.
 - §6 Narration contract — SYSTEM_PROMPT (Task 4).
 - §6 Source-recitation rule — SYSTEM_PROMPT (Task 4) + live-test assertion (Task 9).
 - §6 Per-agent provenance preserved — SYSTEM_PROMPT (Task 4) keeps the youtube/alices voice rules.
-- Invariants — cannot-drop-segments, first-segue-empty, _MIN_SCRIPT_CHARS floor, claim_kind directives, target_words ceiling, memory-isolation → all covered by `_validate_segment` plus pre-existing `stream_episode_script` checks plus SYSTEM_PROMPT rules.
+- Invariants — cannot-drop-segments, first-segue-empty, \_MIN_SCRIPT_CHARS floor, claim_kind directives, target_words ceiling, memory-isolation → all covered by `_validate_segment` plus pre-existing `stream_episode_script` checks plus SYSTEM_PROMPT rules.
 
 **Placeholder scan:** no "TBD", "implement later", "similar to Task N" — every task shows the full code it introduces. No references to types/functions not defined in this plan.
 

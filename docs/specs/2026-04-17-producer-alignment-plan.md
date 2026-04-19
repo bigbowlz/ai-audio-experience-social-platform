@@ -119,7 +119,7 @@ def test_external_decision_skip_shape():
 
 def test_creator_agent_listing_shape():
     listing: CreatorAgentListing = {
-        "handle": "@AlicesLens",
+        "handle": "@GoddamnAxl",
         "display_name": "Alice's Lens",
         "scope": "tech / startup culture",
         "price_usdc": 0.10,
@@ -171,7 +171,7 @@ class CreatorAgentListing(TypedDict):
 
     v0 reads a hardcoded list. v1 queries a real marketplace.
     """
-    handle: str                        # "@AlicesLens"
+    handle: str                        # "@GoddamnAxl"
     display_name: str                  # "Alice's Lens"
     scope: str                         # human-readable scope description
     price_usdc: float                  # demo: 0.10
@@ -579,7 +579,7 @@ def append_bonus(order: RunningOrder, bonus: list[Pitch]) -> RunningOrder:
 
 - [ ] **Step 3: Update `select_bonus_segments_llm` callers to use `RunningOrder`**
 
-In `producer/bonus.py`, the function signature stays the same (it takes guaranteed_slots: list[Pitch] and returns bonus_pitches + reasons). The change is the _callers_ now pass `order["segments"]` and assemble the final RunningOrder via `append_bonus`. Add this docstring note:
+In `producer/bonus.py`, the function signature stays the same (it takes guaranteed*slots: list[Pitch] and returns bonus_pitches + reasons). The change is the \_callers* now pass `order["segments"]` and assemble the final RunningOrder via `append_bonus`. Add this docstring note:
 
 ```python
 def select_bonus_segments_llm(
@@ -1337,7 +1337,7 @@ def test_query_marketplace_returns_hardcoded_listings():
     listings = query_marketplace()
     assert len(listings) >= 1
     handles = {l["handle"] for l in listings}
-    assert "@AlicesLens" in handles
+    assert "@GoddamnAxl" in handles
 
 
 def test_select_external_returns_alices_in_v0():
@@ -1349,7 +1349,7 @@ def test_select_external_returns_alices_in_v0():
             "calendar_events": None,
         }
     })
-    assert chosen["handle"] == "@AlicesLens"
+    assert chosen["handle"] == "@GoddamnAxl"
     assert chosen["price_usdc"] == 0.10
 ```
 
@@ -1386,7 +1386,7 @@ from agents.protocol import (
 # v0: hardcoded list. v1: real marketplace query.
 _MARKETPLACE_V0: list[CreatorAgentListing] = [
     {
-        "handle": "@AlicesLens",
+        "handle": "@GoddamnAxl",
         "display_name": "Alice's Lens",
         "scope": "tech / startup culture",
         "price_usdc": 0.10,
@@ -1418,7 +1418,7 @@ def select_external(
     candidates: list[CreatorAgentListing],
     brief: Brief,
 ) -> CreatorAgentListing:
-    """v0: returns @AlicesLens (the only listing that matches seed topics).
+    """v0: returns @GoddamnAxl (the only listing that matches seed topics).
 
     Brief is accepted for v1 forward-compat; v0 ignores it.
     """
@@ -1426,7 +1426,7 @@ def select_external(
     if not candidates:
         raise ValueError("query_marketplace returned no candidates")
     for c in candidates:
-        if c["handle"] == "@AlicesLens":
+        if c["handle"] == "@GoddamnAxl":
             return c
     return candidates[0]
 ```
@@ -1444,7 +1444,7 @@ git add producer/external.py tests/test_external.py
 git commit -m "feat(producer): external invocation + marketplace + select_external
 
 Decision 1d, Phase 2 core. v0: always-invoke + hardcoded marketplace list +
-@AlicesLens selection. Pure functions; SSE wiring lives in orchestrator."
+@GoddamnAxl selection. Pure functions; SSE wiring lives in orchestrator."
 ```
 
 ---

@@ -37,13 +37,13 @@ The cross-component policy layer for memory. When implemented, this component ow
 
 ### What the stub does
 
-| Surface | Behavior |
-|---|---|
-| `session_end(user_id, episode_id)` | No-op. Logs a single line: `learning-loop: session_end stubbed — no memory writes in v0`. Callable from orchestrator / api-storage when they exist, but v0 never calls it. |
-| `load_agent_memory(user_id, agent_name)` | Returns `bootstrap_memory()` from `agents.protocol`. No persistence. Lazy; no DB round-trip. |
-| `load_producer_memory(user_id)` | Delegates to `producer.memory.load_producer_memory()`, which already returns `bootstrap_producer_memory()`. No persistence. |
-| `seed_producer_memory(user_id, agent_weights)` | **Test/demo seam.** Lets a fixture or env var hand a pre-computed `agent_weights` dict into the module's in-memory cache so the next `load_producer_memory(user_id)` call returns those weights. Enables Episode B's "running-order reordered" demo beat without wiring the full learning pipeline. |
-| `seed_topic_multiplier(user_id, agent_name, multipliers)` | Same seam at the `AgentMemory` level. Lets fixtures pre-seed `topic_multiplier` on a per-(user, agent) record. |
+| Surface                                                   | Behavior                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session_end(user_id, episode_id)`                        | No-op. Logs a single line: `learning-loop: session_end stubbed — no memory writes in v0`. Callable from orchestrator / api-storage when they exist, but v0 never calls it.                                                                                                                          |
+| `load_agent_memory(user_id, agent_name)`                  | Returns `bootstrap_memory()` from `agents.protocol`. No persistence. Lazy; no DB round-trip.                                                                                                                                                                                                        |
+| `load_producer_memory(user_id)`                           | Delegates to `producer.memory.load_producer_memory()`, which already returns `bootstrap_producer_memory()`. No persistence.                                                                                                                                                                         |
+| `seed_producer_memory(user_id, agent_weights)`            | **Test/demo seam.** Lets a fixture or env var hand a pre-computed `agent_weights` dict into the module's in-memory cache so the next `load_producer_memory(user_id)` call returns those weights. Enables Episode B's "running-order reordered" demo beat without wiring the full learning pipeline. |
+| `seed_topic_multiplier(user_id, agent_name, multipliers)` | Same seam at the `AgentMemory` level. Lets fixtures pre-seed `topic_multiplier` on a per-(user, agent) record.                                                                                                                                                                                      |
 
 **Seeding is a test/demo surface, not production.** When the component is unstubbed, `seed_*` functions get a `DeprecationWarning` and the real signal-ingestion path replaces them. Fixtures that use seeding today will need to migrate to emitting synthetic `EpisodeSignals` records.
 
@@ -65,7 +65,7 @@ The following reader-side code is NOT part of this stub — it ships in its owni
 ### Consequence for the demo
 
 - **Episode A → react → Episode B does not auto-reorder in v0.** No `/react` ingestion means no memory delta; Episode B is identical-in-expectation to Episode A unless memory is pre-seeded.
-- **Seeded-demo path:** a Day 5 rehearsal script seeds `agent_weights` (e.g., `{"youtube": 1.5, "calendar": 0.8}`) before Episode B and leaves Episode A unseeded. `producer.memory.applied` fires on Episode B only; the running-order shift is real even though the *learning* step is stubbed.
+- **Seeded-demo path:** a Day 5 rehearsal script seeds `agent_weights` (e.g., `{"youtube": 1.5, "calendar": 0.8}`) before Episode B and leaves Episode A unseeded. `producer.memory.applied` fires on Episode B only; the running-order shift is real even though the _learning_ step is stubbed.
 - **Honest framing:** the demo narration should describe the seeded beat as "this is what memory does with signals we already collected" rather than "this is what just happened from your reactions." The mechanism is real; the closed-loop is v1.
 
 ## When unstubbed — the contract
@@ -113,11 +113,11 @@ Learning-loop writes `topic_multiplier` and `agent_weights` only. Everything els
 
 Per-reaction delta, applied in one batched pass at session-end:
 
-| Reaction | Rule |
-|---|---|
-| `like` on segment `s` | `topic_multiplier[emissions[s].topic] *= 1.20` |
+| Reaction                | Rule                                           |
+| ----------------------- | ---------------------------------------------- |
+| `like` on segment `s`   | `topic_multiplier[emissions[s].topic] *= 1.20` |
 | `replay` on segment `s` | `topic_multiplier[emissions[s].topic] *= 1.10` |
-| `skip` on segment `s` | `topic_multiplier[emissions[s].topic] *= 0.85` |
+| `skip` on segment `s`   | `topic_multiplier[emissions[s].topic] *= 0.85` |
 
 After the batch, clamp: `topic_multiplier[T] ∈ [0.1, 10.0]` per agent spec. Missing keys default to 1.0 (neutral) at pitch-time via `.get(T, 1.0)`.
 
@@ -172,12 +172,12 @@ Fires **N = 15 sec** of inactivity (no playback, no `/react`, no navigation). Ti
 
 ### Dependencies on other components
 
-| Component | Contract | Direction |
-|---|---|---|
-| `player` | Emits `EpisodeSignals.reactions` via `/react` | in |
-| `api-storage` | Persists signals + memory to Supabase; emits `memory.update.*` SSE | out |
-| `agents` | Consumes `AgentMemory` shape (read-only here, except for `topic_multiplier` writes) | out (write) |
-| `producer` | Consumes `ProducerMemory` shape; provides `apply_signal` / `decay_agent_weights` pure functions | in/out |
+| Component     | Contract                                                                                        | Direction   |
+| ------------- | ----------------------------------------------------------------------------------------------- | ----------- |
+| `player`      | Emits `EpisodeSignals.reactions` via `/react`                                                   | in          |
+| `api-storage` | Persists signals + memory to Supabase; emits `memory.update.*` SSE                              | out         |
+| `agents`      | Consumes `AgentMemory` shape (read-only here, except for `topic_multiplier` writes)             | out (write) |
+| `producer`    | Consumes `ProducerMemory` shape; provides `apply_signal` / `decay_agent_weights` pure functions | in/out      |
 
 ### Build plan touchpoints
 
@@ -208,6 +208,7 @@ If `memory.update.decided`'s `reasoning_summary` is LLM-generated and the call f
 ### 4. `segment_position_sec` capture point (severity: medium) — A-Clarity
 
 Paired with `player/docs` Reviewer Concern #3. Capture **before** any playback mutation:
+
 - On skip: playhead at click, BEFORE `audio.currentTime = nextSegmentStart`.
 - On replay-15: playhead BEFORE `audio.currentTime -= 15`.
 - On `like` (long-press): playhead at the moment of long-press.
@@ -220,6 +221,6 @@ v0 `ProducerMemory` holds inter-agent weights only (`agent_weights: dict[str, fl
 
 ## Open questions (component-scoped)
 
-- **Same `@entity` in two agents' pitches.** Each agent has independent memory; they track their own signals. If `@pg` shows up in YouTube AND `@AlicesLens`, both get updates from their own segment's signals. Expected.
+- **Same `@entity` in two agents' pitches.** Each agent has independent memory; they track their own signals. If `@pg` shows up in YouTube AND `@GoddamnAxl`, both get updates from their own segment's signals. Expected.
 - **Clock drift on per-episode decay.** `decay_agent_weights` runs at session-end — no cron needed. Clean.
 - **`topic_tags` provenance on a Pitch.** See `agents/docs` Open Questions (agent-level at pitch-time for domain agents, hand-tagged for `alices_agent`).

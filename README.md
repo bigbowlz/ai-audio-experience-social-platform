@@ -35,6 +35,15 @@ Feedback signals append to `./data/signals/{user_id}/{episode_id}.jsonl`. Next r
 - `--no-export`: skip the ffmpeg concat at end of run (dev iteration)
 - `--user-id <id>`: override default `dev` (isolates feedback signals per user)
 
+**Remove credentials for re-auth:**
+
+```
+rm -f ~/.config/radio-podcast/calendar_token.json \
+       ~/.config/radio-podcast/user_profile.json \
+       ~/.config/radio-podcast/weather_location.json && \
+rm -rf tmp/ydata/
+```
+
 **Output locations:**
 
 - Per-segment TTS: `./data/episodes/{episode_id}/segment_{n}.mp3`
