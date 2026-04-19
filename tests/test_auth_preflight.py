@@ -109,3 +109,24 @@ def test_youtube_preflight_raises_if_capture_produces_nothing(tmp_path, monkeypa
     )
     with pytest.raises(RuntimeError, match="youtube auth did not complete"):
         preflight.ensure_youtube_auth()
+
+
+def test_youtube_preflight_rewraps_file_not_found_as_runtime_error(tmp_path, monkeypatch):
+    """If oauth_and_capture raises FileNotFoundError (missing credentials),
+    preflight rewraps as RuntimeError so the CLI sees a consistent error type."""
+    probe = tmp_path / "probe_123"
+    monkeypatch.setenv("YOUTUBE_PROBE_DIR", str(probe))
+
+    def raise_fnf(out_dir, credentials_path=None):
+        raise FileNotFoundError("client secrets not found at /fake/path")
+
+    monkeypatch.setattr("agents.youtube.capture.oauth_and_capture", raise_fnf)
+    with pytest.raises(RuntimeError, match="credentials missing"):
+        preflight.ensure_youtube_auth()
+
+
+def test_ensure_agent_auth_unknown_name_raises_value_error():
+    """Task 1.3 calls this by user-supplied name; unknown names must surface as
+    ValueError, not leak KeyError from the internal dict lookup."""
+    with pytest.raises(ValueError, match="no preflight registered for agent 'bogus'"):
+        preflight.ensure_agent_auth("bogus")
