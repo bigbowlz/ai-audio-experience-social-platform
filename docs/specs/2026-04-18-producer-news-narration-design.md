@@ -37,10 +37,9 @@ Rationale: `title` is the topic label — the clean search seed. Mixing in `sour
 {
   "segment": { "agent": "...", "pitch_title": "...", "segue_in": "...", "script": "...", "estimated_length_sec": 60 },
   "debug": {
-    "search_query": "underwater photography",
-    "search_used": true,
-    "broadened": false,
-    "research_outcome": "story",
+    "search_tool_calls": 1,
+    "search_queries": ["underwater photography"],
+    "fallback_path": null,
     "raw_llm_text": "...",
     "input_pitch": { "title": "...", "hook": "...", "source_refs": [...], "claim_kind": "..." },
     "target_words": 130,
@@ -49,13 +48,15 @@ Rationale: `title` is the topic label — the clean search seed. Mixing in `sour
 }
 ```
 
+`search_tool_calls` and `search_queries` are OBSERVED from the primary response's `server_tool_use` blocks — not LLM self-report. `fallback_path` is `null` on the happy path, `"repaired"` when JSON repair salvaged a malformed response, `"hook_narration"` when both salvage layers failed and the prose-only fallback produced the segment.
+
 On cache hit, `generate_segment` returns `artifact.segment` verbatim — skips `web_search` and the LLM call entirely. `artifact.debug` is written for inspection but ignored on read. TTL is implicit in the date key (next calendar day = cache miss).
 
 No per-episode search budget counter — 2 content segments × 1 search each is small enough that tighter accounting isn't worth it.
 
 `title_slug` is the pitch title normalized: lowercased, non-alphanumerics → `_`, collapsed runs, trimmed. Cache is advisory — a corrupted or malformed cache file is logged and treated as a miss (not a hard failure).
 
-**Test posture.** Tests that exercise real LLM calls (marked `@pytest.mark.live_llm` or equivalent) set `RADIO_CACHE_DIR=tmp/test_outputs/` so their artifacts are written to a distinct directory separate from real-episode cache. These artifacts are the primary manual-review surface — after a live-LLM test run, the user opens `tmp/test_outputs/segment_scripts/*.json` to audit the segue, script body, search query, and raw LLM text. Tests that mock the LLM skip cache writes entirely (the mock returns a canned SegmentScript; no artifact is generated).
+**Test posture.** Tests that exercise real LLM calls (marked `@pytest.mark.live_llm` or equivalent) set `RADIO_CACHE_DIR=tmp/test_outputs/` so their artifacts are written to a distinct directory separate from real-episode cache. These artifacts are the primary manual-review surface — after a live-LLM test run, the user opens `tmp/test_outputs/segment_scripts/*.json` to audit the segue, script body, observed search queries, and raw LLM text. Tests that mock the LLM skip cache writes entirely (the mock returns a canned SegmentScript; no artifact is generated).
 
 ### 4. `DISABLE_LLM` degradation — unchanged (still raises)
 
@@ -69,9 +70,19 @@ Three-step fallback inside `generate_segment`:
 
 1. **Primary search:** LLM issues one query derived from `title`.
 2. **Broadened retry (if primary returns nothing topical):** LLM issues a second `web_search` call with a broader query — drops the `news` qualifier or climbs to a parent topic (e.g., `"underwater photography news"` → `"photography"`). Both attempts happen inside the same `messages.create` call via `max_uses=2`; the LLM decides when to broaden based on explicit prompt criteria (no fresh result within ~30 days on the topic).
-3. **Hook-narration fallback (if broadened still empty):** segment LLM writes the narration from the pitch hook / `source_refs` / `data` as in the current data-pattern voice. The segment still airs — preserves the `cannot-drop-segments` invariant in `stream_episode_script`.
+3. **Hook-narration fallback (if both searches empty):** segment LLM writes the narration from the pitch hook / `source_refs` / `data` as in the current data-pattern voice. The segment still airs — preserves the `cannot-drop-segments` invariant in `stream_episode_script`.
 
-Emit `producer.segment.research_fallback` telemetry on every hook-narration fallback with `{agent, pitch_title, reason: "empty_search" | "broadened_empty"}`. This tells us real-world research hit rate before v1.
+Emit `producer.segment.research_fallback` telemetry whenever the primary response contained zero `server_tool_use` blocks for `web_search` (`{agent, pitch_title, reason: "no_search"}`). Signal is OBSERVED from the response, not LLM self-report — the model has no `research_outcome` field to fill in. This tells us real-world search hit rate before v1.
+
+### 5a. Fallback on malformed JSON — parse → repair → hook-narration
+
+Separate recovery path for when the LLM returns syntactically invalid JSON (unescaped quotes in a string, prose wrappers, etc.). Three layers in `generate_segment`:
+
+1. **Tolerant extraction:** `_extract_json_object` brace-scans the raw text ignoring string bodies; tolerates prose wrappers like `"Here's the output:\n{...}"`.
+2. **Repair retry:** one no-tools `messages.create` call asking the model to fix the JSON syntax. Raw broken text is dumped to `$RADIO_CACHE_DIR/segment_scripts/_failed_{slug}_{ts}.txt` first for postmortem.
+3. **Hook-narration call:** a plain-prose `messages.create` (no JSON, no tools) using `_HOOK_FALLBACK_SYSTEM_PROMPT`. Wrapped into a `SegmentScript` in code with `segue_in=""` when `is_first=true` else `"Meanwhile,"`. Keeps `cannot-drop-segments` intact even when the model produces nothing JSON-shaped.
+
+Emit `producer.segment.parse_fallback` telemetry when layer 2 or 3 ran, with `{agent, pitch_title, variant: "repaired" | "hook_narration", error: "<parse_error>"}`.
 
 **v1 follow-up (out of scope for this spec, pencilled under Open questions):** once agents emit queued backup pitches (3-5 per agent, ordered), the script loop will retry the next pitch on research failure and drop the slot only when the queue is exhausted. The `cannot-drop-segments` invariant is updated then, alongside the queue mechanism. Without the queue, drop-on-fail is unsafe in v0 (a single bad search day collapses the episode to ~85s of opener + sign-off).
 
@@ -79,20 +90,21 @@ Emit `producer.segment.research_fallback` telemetry on every hook-narration fall
 
 Internal beats (never announced). Applies to YouTube and Alices segments only.
 
-| Beat | ~% of `target_words` | Constraint |
-|---|---|---|
-| `segue_in` | (not counted) | ≤6 words, unchanged — micro-bridge from prior segment. |
-| Story lead | ~20% | Drop straight into the news item — who/where/what. No "here's a story about X" announcement. |
-| Development | ~55% | What happened, why it matters, one vivid detail. |
-| Takeaway | ~25% | Land it. Implicit tie to the listener's domain permitted ("the kind of story that travels well in photography circles"). Explicit bridge forbidden ("since you've been watching X, here's Y"). |
+| Beat        | ~% of `target_words` | Constraint                                                                                                                                                                                     |
+| ----------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `segue_in`  | (not counted)        | ≤6 words, unchanged — micro-bridge from prior segment.                                                                                                                                         |
+| Story lead  | ~20%                 | Drop straight into the news item — who/where/what. No "here's a story about X" announcement.                                                                                                   |
+| Development | ~55%                 | What happened, why it matters, one vivid detail.                                                                                                                                               |
+| Takeaway    | ~25%                 | Land it. Implicit tie to the listener's domain permitted ("the kind of story that travels well in photography circles"). Explicit bridge forbidden ("since you've been watching X, here's Y"). |
 
 `target_words = round(suggested_length_sec × WORDS_PER_MIN / 60)` — same Prompt A constant, same pacing telemetry (`producer.segment.pacing_measured`), same ceiling semantics. `claim_kind` directives still bound temporal framing in the takeaway: a `neutral` pitch's takeaway can't assert "lately", a `rising` pitch's takeaway can.
 
 **Source-recitation rule:** listener's channel names, video titles, and any `source_refs` proper nouns are NOT spoken inside the story body. That is the implicit/explicit line — the topic is the shared ground, the listener's data is not.
 
 **Per-agent provenance** (from `producer/script.py` SYSTEM_PROMPT) stays intact:
+
 - `youtube` — listener's own taste. Takeaway may use second person ("you") sparingly.
-- `alices` — external curator (@AlicesLens). Takeaway uses third person ("Alice"). Never "you've been into X" for a alices segment.
+- `alices` — external curator (@GoddamnAxl). Takeaway uses third person ("Alice"). Never "you've been into X" for a alices segment.
 
 ## Implementation surface
 
@@ -100,8 +112,10 @@ Changes are local to `producer/script.py` with one small addition to `producer/_
 
 ### `producer/script.py`
 
-- **`SYSTEM_PROMPT`** — rewrite for YouTube/Alices segments: new narration contract, web_search usage rules, query-derivation rules (title-only, no listener proper nouns in query), fallback behavior, source-recitation rule. Weather/calendar are already handled by the opener (not routed through this prompt), so the existing provenance tables stay but the hook-vs-data layering sections for taste agents change meaning.
-- **`generate_segment`** — add the `web_search` tool to the `messages.create` call (tool block with `type: "web_search_20250305"`, `max_uses: 2`); bump timeout to `40s`; wrap with cache read/write; emit `producer.segment.research_fallback` when the LLM reports no useful results (via a new JSON field `research_outcome: "story" | "hook_fallback"` on the SegmentScript response, stripped before yield).
+- **`SYSTEM_PROMPT`** — rewrite for YouTube/Alices segments: new narration contract, web_search usage rules, query-derivation rules (title-only, no listener proper nouns in query), fallback behavior, source-recitation rule, JSON safety rules (escape `"` as `\"`, newlines as `\n`, prefer single quotes / em-dashes over nested double quotes). Weather/calendar are already handled by the opener (not routed through this prompt), so the existing provenance tables stay but the hook-vs-data layering sections for taste agents change meaning.
+- **`generate_segment`** — add the `web_search` tool to the `messages.create` call (tool block with `type: "web_search_20250305"`, `max_uses: 2`); bump timeout to `40s`; wrap with cache read/write; on the primary response count `server_tool_use` blocks (`_count_web_search_uses`) and extract issued queries (`_extract_search_queries`); emit `producer.segment.research_fallback` when that count is zero. Layer a parse→repair→hook-narration fallback around JSON parsing (see §5a) and emit `producer.segment.parse_fallback` when either salvage layer runs.
+- **`_JSON_REPAIR_SYSTEM_PROMPT`** + **`_repair_json_retry`** — one no-tools call to fix malformed JSON; returns repaired text or None.
+- **`_HOOK_FALLBACK_SYSTEM_PROMPT`** + **`_hook_fallback_narration`** — plain-prose LLM call used when JSON salvage fails; builds a `SegmentScript` in code from the returned text.
 - **Module docstring** — note research narration is LLM-only by design.
 
 ### `producer/__init__.py`
@@ -132,13 +146,13 @@ Changes are local to `producer/script.py` with one small addition to `producer/_
 
 ## Non-goals (v0)
 
-| Non-goal | Why |
-|---|---|
-| Queued backup pitches + drop-on-exhaustion | v1. Pencilled under Open questions. |
-| `search_seed: str` on the Pitch protocol | Only if `title`-only queries prove too generic in telemetry. |
-| Per-episode research budget counter | 2 content segments is small enough that `max_uses=1` per call is sufficient. |
-| Allowlisted news sources / RSS feeds | Coverage narrower than LLM-curated search; no current evidence we need this. |
-| Cross-segment topic dedup via search | Rare overlap at 2 content segments; add if telemetry shows it matters. |
+| Non-goal                                   | Why                                                                          |
+| ------------------------------------------ | ---------------------------------------------------------------------------- |
+| Queued backup pitches + drop-on-exhaustion | v1. Pencilled under Open questions.                                          |
+| `search_seed: str` on the Pitch protocol   | Only if `title`-only queries prove too generic in telemetry.                 |
+| Per-episode research budget counter        | 2 content segments is small enough that `max_uses=1` per call is sufficient. |
+| Allowlisted news sources / RSS feeds       | Coverage narrower than LLM-curated search; no current evidence we need this. |
+| Cross-segment topic dedup via search       | Rare overlap at 2 content segments; add if telemetry shows it matters.       |
 
 ## Open questions
 

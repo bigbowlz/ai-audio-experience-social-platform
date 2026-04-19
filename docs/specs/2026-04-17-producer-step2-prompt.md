@@ -125,7 +125,7 @@ Block 4 — **`claim_kind` directive table.** Mirrors `agents/youtube/llm.py` li
 Block 5 — **Per-agent `data` crib.** Tight paragraph per agent:
 
 - **weather** — `data.current` (temp/condition/wind), `data.day_ahead` (upcoming high/low/sunset), `data.notable_facts` (top 3 ranked radio-interesting facts), `data.air_quality`, `data.location_name`. Ignore `hourly_forecast` and `day_past` unless surfacing a specific hour matters.
-- **calendar** — `data.api_reachable` (bool), `data.events[]` with `summary`, `start`, `end`, `duration_min`, `attendee_count`, `is_recurring`, `has_video_call`, `organizer`.
+- **calendar** — `data.api_reachable` (bool), `data.events[]` with `summary`, `start`, `end`, `duration_min`, `attendee_count`, `attendees` (list of display names; may be shorter than `attendee_count` or empty when names aren't resolvable — never contains emails), `is_recurring`, `has_video_call`, `organizer`.
 - **youtube** / **alices** — `data` is usually `{}`. Hook + rationale + source_refs are the substrate.
 
 Block 6 — **Hook vs. data layering rule** (the central invariant):

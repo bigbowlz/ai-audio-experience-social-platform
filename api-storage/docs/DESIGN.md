@@ -1,5 +1,7 @@
 # Component: `api-storage`
 
+> **v0 Status (2026-04-18): DEFERRED TO v1.** This full spec (Next.js routes, SSE stream, Supabase Postgres) is not built in v0. v0 ships only the minimum local-filesystem slice in [`storage/`](../../storage/) — see the "Addendum 2026-04-18 (PM) — Local-filesystem storage" section of [`docs/specs/2026-04-18-v0-cli-pivot-plan.md`](../../docs/specs/2026-04-18-v0-cli-pivot-plan.md). The content below is the v1 target.
+
 **Status:** DRAFT (component extract from master design)
 **Master doc:** [`~/.gstack/projects/bigbowlz-ai-audio-experience-social-platform/wanlizhou-main-design-20260413-182237.md`](../../../../.gstack/projects/bigbowlz-ai-audio-experience-social-platform/wanlizhou-main-design-20260413-182237.md) — canonical source.
 **Reviewed:** 2026-04-13 (spec review 6/10, red-team)
@@ -49,6 +51,7 @@ The integration spine. Every other component wires through here:
 Per-event reasoning-phrase convention: every agent-facing event carries `reasoning_summary` (≤80 chars).
 
 **Orchestration events (in sequence):**
+
 - `episode.started` `{episode_id, selected_agents}`
 - `agent.pitching.started` `{agent, phase, reasoning_summary}` — **`phase` added**
 - `agent.pitch.emitted` `{agent, phase, pitch, priority}` — **`phase` added**
@@ -60,7 +63,7 @@ Per-event reasoning-phrase convention: every agent-facing event carries `reasoni
 - `payment.confirmed` `{tx_hash, basescan_url, amount_usdc, mode_badge, reasoning_summary}`
 - `payment.pending` `{tx_hash, basescan_url, mode_badge}` — **new; 5s soft-timeout**
 - `payment.mocked` `{frozen_tx_hash, basescan_url, reason, mode_badge}` — **new; 10s hard-timeout**
-- `(agent.pitching.* with phase="external" for @AlicesLens)`
+- `(agent.pitching.* with phase="external" for @GoddamnAxl)`
 - `producer.selecting.started` `{reasoning_summary}`
 - `producer.pick` `{agent, pitch_id, allocated_sec, reasoning_summary}` — one per pick
 - `producer.selecting.done` `{running_order, reasoning_summary}`
@@ -74,6 +77,7 @@ Per-event reasoning-phrase convention: every agent-facing event carries `reasoni
 - `error` `{stage, message}`
 
 **Memory-update events (session-end, gated by `APPROACH_B=true`):**
+
 - `session.ended` `{episode_id, signals_count}`
 - `memory.update.started` `{agent, reasoning_summary}`
 - `memory.update.decided` `{agent, action, deltas, reasoning_summary}`
@@ -114,6 +118,7 @@ create index on signals(user_id, episode_id);
 ```
 
 Local filesystem layout:
+
 ```
 ./data/episodes/{episode_id}/segment_0.mp3
 ./data/episodes/{episode_id}/segment_1.mp3
@@ -125,15 +130,15 @@ Both directories git-ignored. Created on demand at runtime.
 
 ## Dependencies on other components
 
-| Component | Contract | Direction |
-|---|---|---|
-| every other component | this is the spine | bidirectional |
-| `agents` | reads/writes `agent_memory` row per agent | in/out |
-| `producer` | reads Producer-memory row (agent_name='producer'); drives SSE sequence | in/out |
-| `payment` | emits `payment.*` SSE; reads `PAYMENT_MODE` env | in |
-| `audio` | writes per-segment MP3 to `./data/episodes/{id}/`; emits `audio.*` SSE | in |
-| `player` | POSTs `/react`; subscribes to `/generate` SSE; loads segment MP3s via `/audio/:episode_id/:segment_n` | out |
-| `learning-loop` | policy consumer of signals + memory shapes; no code here | policy only |
+| Component             | Contract                                                                                              | Direction     |
+| --------------------- | ----------------------------------------------------------------------------------------------------- | ------------- |
+| every other component | this is the spine                                                                                     | bidirectional |
+| `agents`              | reads/writes `agent_memory` row per agent                                                             | in/out        |
+| `producer`            | reads Producer-memory row (agent_name='producer'); drives SSE sequence                                | in/out        |
+| `payment`             | emits `payment.*` SSE; reads `PAYMENT_MODE` env                                                       | in            |
+| `audio`               | writes per-segment MP3 to `./data/episodes/{id}/`; emits `audio.*` SSE                                | in            |
+| `player`              | POSTs `/react`; subscribes to `/generate` SSE; loads segment MP3s via `/audio/:episode_id/:segment_n` | out           |
+| `learning-loop`       | policy consumer of signals + memory shapes; no code here                                              | policy only   |
 
 ## Build plan touchpoints
 
@@ -161,6 +166,7 @@ Both directories git-ignored. Created on demand at runtime.
 Master's SSE list has three gaps that break component integration:
 
 **Fix:** add/extend three events as shown in the schema section above.
+
 - `phase: "internal" | "external"` on all `agent.pitching.*` events so UI distinguishes rounds
 - `audio.segment.delayed {segment_index, eta_ms}` for P13 backpressure (tells music filler to fade back in)
 - `payment.mocked {frozen_tx_hash, basescan_url, reason, mode_badge}` and `payment.pending {tx_hash, basescan_url, mode_badge}` for payment timeout paths
@@ -172,6 +178,7 @@ These are the glue between components; without them, integration will be debugge
 Master's Day 3 stacks: SSE subscriber + pitch-round UI + full Huxe player + music filler + P13 pipelined queue + gapless crossfades. That's two days of work.
 
 **Fix (coordinated across components):**
+
 - `api-storage` Day 3: SSE streaming from `/generate` (real events from real agents)
 - `player` Day 3: SSE consumer + pitch-round view + basic audio + ⟲/⏭ + music filler
 - `audio` Day 3 morning: P13 client pipelining (moved from Day 2)

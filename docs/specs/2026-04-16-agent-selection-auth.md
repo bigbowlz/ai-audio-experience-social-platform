@@ -113,7 +113,7 @@ Each card displays:
 | Field      | YouTube                             | Calendar                         | Weather                        | Alice                   |
 | ---------- | ----------------------------------- | -------------------------------- | ------------------------------ | ------------------------- |
 | Icon       | YouTube logo                        | Calendar icon                    | Weather icon                   | Alice avatar            |
-| Name       | @YouTube                            | @Calendar                        | @Weather                       | @AlicesLens             |
+| Name       | @YouTube                            | @Calendar                        | @Weather                       | @GoddamnAxl               |
 | Scope      | "Your subscriptions & liked videos" | "Today's Google Calendar events" | "Local weather conditions"     | "Alice's curated picks" |
 | Auth badge | "Connected" / "Not connected"       | "Connected" / "Not connected"    | "Location set" / "No location" | "Ready" (always)          |
 | Toggle     | on/off                              | on/off                           | on/off                         | on/off                    |
