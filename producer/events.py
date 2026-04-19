@@ -49,6 +49,74 @@ class JsonlSink:
         self._stream.flush()
 
 
+class PrettySink:
+    """Writes events as indented, key-per-line tree text (default: stdout).
+
+    Each event renders as a header line plus one line per (possibly nested)
+    payload field. Nested dicts/lists indent further; list items use
+    ``[i]`` keys. Designed for human-readable CLI runs — JsonlSink remains
+    the wire format for SSE/api-storage consumers.
+
+    Example::
+
+        ▸ producer.marketplace.queried
+          candidates:
+            [0]:
+              handle: alices
+              price_usdc: 0.1
+          reasoning_summary: 1 candidate available
+    """
+
+    INDENT = "  "
+    EVENT_GLYPH = "▸"
+
+    def __init__(self, stream: IO[str] | TextIO | None = None) -> None:
+        self._stream = stream if stream is not None else sys.stdout
+
+    def __call__(self, name: str, payload: dict) -> None:
+        lines = [f"{self.EVENT_GLYPH} {name}"]
+        lines.extend(self._render(payload, depth=1))
+        self._stream.write("\n".join(lines) + "\n")
+        self._stream.flush()
+
+    def _render(self, value: object, depth: int) -> list[str]:
+        prefix = self.INDENT * depth
+        lines: list[str] = []
+        if isinstance(value, dict):
+            if not value:
+                lines.append(f"{prefix}{{}}")
+                return lines
+            for k, v in value.items():
+                if isinstance(v, (dict, list)) and v:
+                    lines.append(f"{prefix}{k}:")
+                    lines.extend(self._render(v, depth + 1))
+                else:
+                    lines.append(f"{prefix}{k}: {self._scalar(v)}")
+        elif isinstance(value, list):
+            if not value:
+                lines.append(f"{prefix}[]")
+                return lines
+            for i, item in enumerate(value):
+                if isinstance(item, (dict, list)) and item:
+                    lines.append(f"{prefix}[{i}]:")
+                    lines.extend(self._render(item, depth + 1))
+                else:
+                    lines.append(f"{prefix}[{i}]: {self._scalar(item)}")
+        else:
+            lines.append(f"{prefix}{self._scalar(value)}")
+        return lines
+
+    @staticmethod
+    def _scalar(v: object) -> str:
+        if v is None:
+            return "null"
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, str):
+            return v
+        return str(v)
+
+
 # ── Module-level convenience ──────────────────────────────────────────
 
 _default_bus = EventBus()

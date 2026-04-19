@@ -7,6 +7,7 @@
 ## Purpose
 
 The Producer is a distinct component (not a prompt pretending to be one) that:
+
 1. Reads internal agent pitches
 2. Decides to invoke an external agent (v0 policy: always-invoke)
 3. Queries the marketplace stub (hardcoded candidates)
@@ -37,7 +38,7 @@ class Producer:
         """v0: reads hardcoded list. Returns candidates with handle + price_usdc + wallet."""
 
     def select_external(candidates: list[CreatorAgentListing], brief: Brief) -> CreatorAgentListing:
-        """v0: picks @AlicesLens (only listing that matches seed topics)."""
+        """v0: picks @GoddamnAxl (only listing that matches seed topics)."""
 
     def select(pitches_by_agent: dict[str, list[Pitch]], brief: Brief) -> RunningOrder:
         """Picks subset fitting total duration, allocates per-agent airtime, orders.
@@ -84,11 +85,20 @@ async def generate_opener(
     produced visible repetition in the first ~90s."""
 
 async def generate_sign_off(brief: Brief) -> str:
-    """Separate small LLM call — ~10s spoken sign-off."""
+    """Separate small LLM call — ~12s spoken sign-off with a close beat
+    ("that's today's feed") + parting line. See
+    docs/specs/2026-04-19-prompt-and-cli-polish.md §P8."""
 
 def generate_episode_script(selected: list[Pitch], brief: Brief) -> EpisodeScript:
     """Sync back-compat collector. Runs `split_opener_inputs`, `generate_opener`,
     drains `stream_episode_script` over content pitches, and runs `generate_sign_off`."""
+
+# Public payload builders — single source of truth for the LLM user-message
+# JSON shape. Used by generate_opener / generate_segment / generate_sign_off
+# AND by storage.episode_artifacts so on-disk records match what the LLM saw.
+def build_opener_payload(weather_pitch, calendar_pitch, first_content_pitch, brief) -> dict: ...
+def build_segment_payload(segment, brief, is_first) -> dict: ...
+def build_sign_off_payload(brief) -> dict: ...
 ```
 
 **RunningOrder shape:** see master.
@@ -96,18 +106,18 @@ def generate_episode_script(selected: list[Pitch], brief: Brief) -> EpisodeScrip
 
 ## Dependencies on other components
 
-| Component | Contract | Direction |
-|---|---|---|
-| `agents` | consumes `list[Pitch]` with `priority: float` scalar only | in |
-| `payment` | calls `payment.initiate_tx(producer_wallet, agent_wallet, 0.10)` | out |
-| `audio` | emits per-segment scripts for streaming TTS | out |
-| `learning-loop` | reads Producer-memory; writes Producer-memory at session end | in/out |
-| `api-storage` | emits SSE events for every stage | out |
+| Component       | Contract                                                         | Direction |
+| --------------- | ---------------------------------------------------------------- | --------- |
+| `agents`        | consumes `list[Pitch]` with `priority: float` scalar only        | in        |
+| `payment`       | calls `payment.initiate_tx(producer_wallet, agent_wallet, 0.10)` | out       |
+| `audio`         | emits per-segment scripts for streaming TTS                      | out       |
+| `learning-loop` | reads Producer-memory; writes Producer-memory at session end     | in/out    |
+| `api-storage`   | emits SSE events for every stage                                 | out       |
 
 ## Build plan touchpoints
 
 - **Day 1:** Stub Producer. `select()` picks top-N by priority fitting total_length_sec budget. Script generation emits segments as one structured-output call (monolithic `write_script()`, historical). CLI prints valid RunningOrder JSON. End-to-end works.
-- **Day 4:** External-invocation decision (unconditional), marketplace stub (hardcoded candidates), `select_external()` → @AlicesLens. Wire payment call between internal pitches and external pitch.
+- **Day 4:** External-invocation decision (unconditional), marketplace stub (hardcoded candidates), `select_external()` → @GoddamnAxl. Wire payment call between internal pitches and external pitch.
 - **Day 5 (STRETCH):** Producer-memory inter-agent weights (`agent_weights` driven by like/replay/skip, see §Producer-memory learning rule). Refactor script generation to per-segment async iterator (`stream_episode_script()`) for P13 streaming.
 
 ## Success criteria
@@ -123,6 +133,7 @@ def generate_episode_script(selected: list[Pitch], brief: Brief) -> EpisodeScrip
 The original `write_script()` interface from master was one structured-output LLM call. On Monday LLM load + one malformed-JSON retry, Episode B live regen blows the 75-sec budget. Screen sits on "writing script..." while builder narrates over silence. The whole "compounding personalization" beat dies.
 
 **Fix (Day 5 morning, hard requirement — as planned):**
+
 - Split the monolithic script call into a per-segment async iterator (`stream_episode_script()`)
 - Segment 0 is critical-path under P13 (target ~3-5s LLM + ~3-5s TTS = ~6-10s to first audio)
 - Segments 1-N stream in background while segment 0 plays
@@ -138,6 +149,7 @@ The original `write_script()` interface from master was one structured-output LL
 Episode A has a full auto-switch fallback (pre-cached SSE replay + cached MP3 + pre-captured payment tx). Episode B has nothing. If Minute 6-8 budget breaches, there's no safety net.
 
 **Fix (Day 5 afternoon, hard requirement):**
+
 - Pre-capture an Episode B SSE replay during Day 5 rehearsal (fully scripted running order change, matching pre-captured Episode A)
 - Pre-render the stacked-bar SVG comparing Episode A vs. Episode B running orders (reads from two saved JSONs)
 - Document a 60-sec budget alarm that auto-plays the pre-cached Episode B opener with honest "pre-recorded" badge
@@ -240,10 +252,24 @@ are not narration material. Full rationale: [docs/specs/2026-04-18-producer-news
   writes the script — all in one `messages.create`. Segment timeout bumps
   30s → 40s to absorb two search round-trips.
 - **Narration contract.** Internal beats (never announced): segue →
-  ~20% story lead → ~55% development → ~25% takeaway. `claim_kind` directives
-  still bound temporal framing in the takeaway. `target_words` ceiling
-  semantics from Prompt A unchanged; `producer.segment.pacing_measured`
-  unchanged.
+  ~10% lead → ~70% factual body → ~10% flex band → ~10% takeaway.
+  `claim_kind` directives still bound temporal framing in the takeaway.
+  `target_words` ceiling semantics from Prompt A unchanged;
+  `producer.segment.pacing_measured` unchanged. The "factual body"
+  band requires ≥4 distinct factual sentences (named people, works,
+  places, dates, numbers, quotes, causes/effects); commentary stays in
+  the flex band and takeaway only. See
+  [docs/specs/2026-04-19-prompt-and-cli-polish.md §P5](../../docs/specs/2026-04-19-prompt-and-cli-polish.md#p5--beat-ratios-rewritten-for-80-factual-body).
+- **Inline markup stripped.** `_strip_inline_markup` runs on every output
+  path (cached read, LLM parse, JSON repair, hook fallback, opener,
+  sign-off) to remove `<cite index="…">…</cite>` and `<br>` tags that
+  leak from `web_search` results. See
+  [docs/specs/2026-04-19-prompt-and-cli-polish.md §P7](../../docs/specs/2026-04-19-prompt-and-cli-polish.md#p7--strip-cite--br-tags).
+- **Bilingual handling.** Chinese / Japanese proper nouns, titles,
+  phrases, and quotes stay in their original script — no translation,
+  pinyin/romaji, or parenthetical glosses. Enforced in all four prompts;
+  ElevenLabs `eleven_turbo_v2_5` auto-detects CJK. See
+  [docs/specs/2026-04-19-prompt-and-cli-polish.md §P3](../../docs/specs/2026-04-19-prompt-and-cli-polish.md#p3--preserve-chinese--japanese-script-verbatim).
 - **Source-recitation rule (invariant).** Listener channel names / video
   titles / `source_refs` proper nouns never appear inside the story body.
   The pitch topic is the shared ground; the listener's data is not.
@@ -251,12 +277,46 @@ are not narration material. Full rationale: [docs/specs/2026-04-18-producer-news
 ### Hook-narration fallback (preserves `cannot-drop-segments`)
 
 When both searches return nothing usable, the LLM writes the narration from
-the pitch `hook` / `source_refs` / `data` in the pre-research voice and sets
-`research_outcome: "hook_fallback"` on its output. The segment still airs —
-v0 has no queued-backup-pitch mechanism yet, so the drop-on-fail path is
-unsafe. `producer.segment.research_fallback` SSE fires on this path for
-hit-rate telemetry. `_MIN_SCRIPT_CHARS = 20` floor is enforced on every
-path (cache hit, story, hook fallback) via `_validate_segment`.
+the pitch `hook` / `source_refs` / `data` in the pre-research voice. The
+segment still airs — v0 has no queued-backup-pitch mechanism yet, so the
+drop-on-fail path is unsafe. Hit-rate telemetry comes from an OBSERVED
+signal, not LLM self-report: `producer.segment.research_fallback` SSE fires
+iff the primary response contained zero `server_tool_use` blocks for
+`web_search` (reason: `"no_search"`). `_MIN_SCRIPT_CHARS = 20` floor is
+enforced on every path (cache hit, story, hook fallback, parse fallback)
+via `_validate_segment`.
+
+**Generic-trend counts as nothing-usable.** The SYSTEM_PROMPT now lists a
+specific failure mode — think-piece content ("audiences are embracing X",
+"several forces are aligning") with no named people, works, dates,
+places, or numbers — as grounds to fall back. A hook-narration segment
+with real named facts beats a research segment of think-piece vapor. See
+[docs/specs/2026-04-19-prompt-and-cli-polish.md §N3](../../docs/specs/2026-04-19-prompt-and-cli-polish.md#n3--title-shape-rule--generic-trend-fallback).
+
+### Parse-failure fallback (defense in depth)
+
+The LLM is instructed to return a single JSON object. When it returns
+syntactically invalid JSON (unescaped quotes in a string, stray prose
+wrappers, etc.), `generate_segment` recovers along three layers:
+
+1. **Tolerant extraction** — `_extract_json_object` brace-scans the raw
+   text, ignoring string bodies, so prose wrappers like `"Here's:\n{...}"`
+   parse cleanly.
+2. **Repair retry** — one no-tools `messages.create` call whose system
+   prompt is "fix JSON syntax, return the corrected object only". The
+   raw original text is dumped to
+   `$RADIO_CACHE_DIR/segment_scripts/_failed_{slug}_{ts}.txt` for
+   postmortem first.
+3. **Hook-narration call** — a plain-prose `messages.create` call (no JSON,
+   no tools) using `_HOOK_FALLBACK_SYSTEM_PROMPT`. The returned text is
+   wrapped into a `SegmentScript` in code with `segue_in=""` when
+   `is_first=true` else `"Meanwhile,"`. This keeps
+   `cannot-drop-segments` intact even when the model produces nothing
+   JSON-shaped.
+
+`producer.segment.parse_fallback` SSE fires whenever layer 2 or 3 ran,
+with `variant: "repaired" | "hook_narration"` and the original
+`parse_error` string.
 
 ### Same-day cache
 
@@ -264,9 +324,14 @@ One pretty-printed JSON artifact per successful segment at
 `$RADIO_CACHE_DIR/segment_scripts/{agent}_{title_slug}_{YYYYMMDD}_{wpm}.json`
 (default `tmp/segment_script_cache/`, override via `RADIO_CACHE_DIR`). Artifact
 shape: `{segment, debug}` where `debug` carries
-`{search_query, search_used, broadened, research_outcome, raw_llm_text,
-input_pitch, target_words, words_per_minute}` — the debug block is the manual
-inspection surface for live-LLM test runs (`RADIO_CACHE_DIR=tmp/test_outputs/
+`{search_tool_calls, search_queries, fallback_path, raw_llm_text,
+input_pitch, target_words, words_per_minute}`. `search_tool_calls` and
+`search_queries` are observed from the response's `server_tool_use` blocks
+(ground truth, not LLM self-report). `fallback_path` is `null` on the
+happy path, `"repaired"` when JSON repair salvaged a malformed response,
+`"hook_narration"` when both salvage layers failed and the prose-only
+fallback produced the segment. The debug block is the manual inspection
+surface for live-LLM test runs (`RADIO_CACHE_DIR=tmp/test_outputs/
 RUN_LIVE_LLM=1 pytest tests/test_segment_live.py`).
 
 Cache is advisory: corrupted / malformed files are logged and treated as a
@@ -284,7 +349,7 @@ the cache hit path checks the env before returning.
 
 Changes are local to [producer/script.py](../script.py) plus the
 `DEFAULT_CACHE_DIR` / `cache_dir()` accessor in
-[producer/__init__.py](../__init__.py). Selection (Step 1 / Step 1.5), the
+[producer/**init**.py](../__init__.py). Selection (Step 1 / Step 1.5), the
 opener, the sign-off, agents, and `stream_episode_script` ordering /
 cannot-drop-segments checks are all untouched. Weather and calendar still
 flow through the separate opener prompt (no web_search).
@@ -351,11 +416,11 @@ def bootstrap_producer_memory() -> ProducerMemory:
 
 ### Writer signals (learning-loop)
 
-| Signal   | Source                            | Rule (per event, pre-clamp)          |
-|----------|-----------------------------------|--------------------------------------|
-| `like`   | listener taps like on a segment   | `w[agent] *= 1.10`                   |
-| `replay` | listener replays a segment        | `w[agent] *= 1.20`                   |
-| `skip`   | listener skips a segment          | `w[agent] *= 0.90`                   |
+| Signal   | Source                          | Rule (per event, pre-clamp) |
+| -------- | ------------------------------- | --------------------------- |
+| `like`   | listener taps like on a segment | `w[agent] *= 1.10`          |
+| `replay` | listener replays a segment      | `w[agent] *= 1.20`          |
+| `skip`   | listener skips a segment        | `w[agent] *= 0.90`          |
 
 After each event, clamp to `[AGENT_WEIGHT_MIN, AGENT_WEIGHT_MAX]`. Multiplicative updates are commutative within a session, so order of feedback events within one episode does not affect the final weight. Writes are idempotent per `(episode_id, segment_index, signal)` — learning-loop dedupes before applying. Constants (1.10, 1.20, 0.90) are chosen so ~10 consecutive likes saturate the upper clamp and ~10 skips saturate the lower clamp — roughly 2–3 episodes to register a strong preference.
 
@@ -421,47 +486,47 @@ def apply_producer_memory(
 
 Reader — `apply_producer_memory` (pure function):
 
-| Fixture | Setup | Expected |
-|---------|-------|----------|
-| **Default weights** | `agent_weights = {}` | All priorities unchanged. |
-| **Single agent boosted** | `agent_weights = {"youtube": 1.5}` | youtube pitches scaled 1.5×; others unchanged. |
-| **Intra-agent order preserved** | youtube weight 1.5; priorities `[0.9, 0.7, 0.5]` | Post-adjust `[1.35, 1.05, 0.75]`; relative order unchanged, argmax unchanged. |
-| **Cross-agent bonus reorder** | youtube weight 1.5, alices weight 1.0; pre: alices pitch 0.7 > youtube pitch 0.5 | Post: youtube 0.75 > alices 0.7 — youtube wins bonus sort. |
-| **Weight clamped (over MAX)** | `agent_weights = {"youtube": 5.0}` | Effective weight = 2.0; priorities scaled 2.0×. |
-| **Weight clamped (under MIN)** | `agent_weights = {"calendar": 0.01}` | Effective weight = 0.3. |
-| **Weight malformed (negative, NaN, None)** | `agent_weights = {"youtube": -0.5}`, `{"weather": float("nan")}`, `{"calendar": None}` | Clamped to `[MIN, MAX]`; NaN/None treated as default 1.0 (no propagation). |
-| **Demoted agent still guaranteed** | `agent_weights = {"calendar": 0.3}`, calendar has 1 pitch priority 0.5 | Pipeline (`apply_producer_memory` → `select_guaranteed_slots`): calendar still appears in guaranteed; its pitch priority = 0.15. |
-| **Memory absent** | `memory = {}` or missing `agent_weights` key | All priorities unchanged — `.get("agent_weights", {})` defaults cleanly. |
-| **Bootstrap identity** | `memory = bootstrap_producer_memory()` | All priorities unchanged; function returns a dict shape-equal to input under priority comparison. |
+| Fixture                                    | Setup                                                                                  | Expected                                                                                                                         |
+| ------------------------------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Default weights**                        | `agent_weights = {}`                                                                   | All priorities unchanged.                                                                                                        |
+| **Single agent boosted**                   | `agent_weights = {"youtube": 1.5}`                                                     | youtube pitches scaled 1.5×; others unchanged.                                                                                   |
+| **Intra-agent order preserved**            | youtube weight 1.5; priorities `[0.9, 0.7, 0.5]`                                       | Post-adjust `[1.35, 1.05, 0.75]`; relative order unchanged, argmax unchanged.                                                    |
+| **Cross-agent bonus reorder**              | youtube weight 1.5, alices weight 1.0; pre: alices pitch 0.7 > youtube pitch 0.5   | Post: youtube 0.75 > alices 0.7 — youtube wins bonus sort.                                                                     |
+| **Weight clamped (over MAX)**              | `agent_weights = {"youtube": 5.0}`                                                     | Effective weight = 2.0; priorities scaled 2.0×.                                                                                  |
+| **Weight clamped (under MIN)**             | `agent_weights = {"calendar": 0.01}`                                                   | Effective weight = 0.3.                                                                                                          |
+| **Weight malformed (negative, NaN, None)** | `agent_weights = {"youtube": -0.5}`, `{"weather": float("nan")}`, `{"calendar": None}` | Clamped to `[MIN, MAX]`; NaN/None treated as default 1.0 (no propagation).                                                       |
+| **Demoted agent still guaranteed**         | `agent_weights = {"calendar": 0.3}`, calendar has 1 pitch priority 0.5                 | Pipeline (`apply_producer_memory` → `select_guaranteed_slots`): calendar still appears in guaranteed; its pitch priority = 0.15. |
+| **Memory absent**                          | `memory = {}` or missing `agent_weights` key                                           | All priorities unchanged — `.get("agent_weights", {})` defaults cleanly.                                                         |
+| **Bootstrap identity**                     | `memory = bootstrap_producer_memory()`                                                 | All priorities unchanged; function returns a dict shape-equal to input under priority comparison.                                |
 
 End-to-end pipeline (the product-visible claim):
 
-| Fixture | Setup | Expected |
-|---------|-------|----------|
+| Fixture             | Setup                                                                                                                                                                                                                             | Expected                                                                                                                                                                                                                      |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Bonus-slot flip** | 4 agents with 3 pitches each; pre-adjust, alices' #2 pitch would win the last bonus slot over youtube's #2 pitch by priority. With `DISABLE_LLM=1` to force the deterministic fallback, set `agent_weights = {"youtube": 1.5}`. | After `apply_producer_memory → select_guaranteed_slots → select_bonus_segments_llm` (fallback path), the final running order contains youtube's #2 pitch in the bonus slot, not alices' #2. Guaranteed slots are unchanged. |
 
 Writer — learning-loop (fixtures live in learning-loop test suite; design-locked here):
 
-| Fixture | Setup | Expected |
-|---------|-------|----------|
-| **Saturation boundary** | Start at `w = 1.0`; apply `like` × 10 (no decay). | Final `w = 2.0` (clamped on or before the 10th event: `1.10^8 ≈ 2.14` clamps on the 8th event; test asserts clamp is the final value, not the pre-clamp multiplication). |
-| **Idempotency** | Apply `(episode_id=E1, segment_index=2, signal=like)` twice. | Weight updated once; second application is a no-op (dedupe). |
-| **Per-episode EMA decay** | `agent_weights = {"youtube": 2.0, "calendar": 0.3}`; run `decay_agent_weights()` once with no feedback. | youtube: `0.95·2.0 + 0.05·1.0 = 1.95`; calendar: `0.95·0.3 + 0.05·1.0 = 0.335`. Both move one step toward 1.0. |
+| Fixture                   | Setup                                                                                                   | Expected                                                                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Saturation boundary**   | Start at `w = 1.0`; apply `like` × 10 (no decay).                                                       | Final `w = 2.0` (clamped on or before the 10th event: `1.10^8 ≈ 2.14` clamps on the 8th event; test asserts clamp is the final value, not the pre-clamp multiplication). |
+| **Idempotency**           | Apply `(episode_id=E1, segment_index=2, signal=like)` twice.                                            | Weight updated once; second application is a no-op (dedupe).                                                                                                             |
+| **Per-episode EMA decay** | `agent_weights = {"youtube": 2.0, "calendar": 0.3}`; run `decay_agent_weights()` once with no feedback. | youtube: `0.95·2.0 + 0.05·1.0 = 1.95`; calendar: `0.95·0.3 + 0.05·1.0 = 0.335`. Both move one step toward 1.0.                                                           |
 
 Integration — SSE:
 
-| Fixture | Setup | Expected |
-|---------|-------|----------|
+| Fixture                                | Setup                                                                                   | Expected                                                                                                                                                                                                                                        |
+| -------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **`producer.memory.applied` emission** | `agent_weights = {"youtube": 1.5, "calendar": 0.8}`; pitches with known raw priorities. | One `producer.memory.applied` event fires before `producer.selecting.started`, payload contains `{agent_weights, changes: [{agent, pre_max_priority, post_max_priority}, ...]}`. No event emitted when `agent_weights == {}` (silent identity). |
 
 ### Non-goals (v0)
 
-| Non-goal | Why |
-|---|---|
+| Non-goal                                                    | Why                                                                                                                   |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | Pacing preferences (opener, length, fatigue, segment_count) | v1. Moved out of v0 — see Reviewer Concern #4. Not writable from likes/replays/skips without a separate signal layer. |
-| Topic-level or content-level weights | Violates scope boundary. See `AgentMemory.topic_multiplier`. |
-| Cross-user / aggregate priors | v1+. v0 memory is per-user. |
-| LLM-based weight inference / raw memory in prompts | The pure function is the whole point — behavior must be testable and honest about where the decision happens. |
+| Topic-level or content-level weights                        | Violates scope boundary. See `AgentMemory.topic_multiplier`.                                                          |
+| Cross-user / aggregate priors                               | v1+. v0 memory is per-user.                                                                                           |
+| LLM-based weight inference / raw memory in prompts          | The pure function is the whole point — behavior must be testable and honest about where the decision happens.         |
 
 ### Integration in orchestrator
 
