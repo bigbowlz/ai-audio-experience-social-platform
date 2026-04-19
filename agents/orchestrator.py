@@ -34,6 +34,10 @@ from agents.protocol import (
     TodayContext,
     UserProfile,
 )
+# Module-level so tests can monkeypatch `agents.orchestrator.ensure_agent_auth`
+# cleanly. No circular import risk — auth.preflight only does its (lazy)
+# agent-module imports at call time.
+from auth.preflight import ensure_agent_auth
 
 if TYPE_CHECKING:
     pass
@@ -282,7 +286,8 @@ def cli_main(argv: list[str] | None = None) -> int:
     # and raises RuntimeError only if the flow failed to produce the artifact.
     # Running preflight here ensures a missing artifact surfaces as a clean
     # preflight error, not a constructor-time explosion inside the agent.
-    from auth.preflight import ensure_agent_auth
+    # `ensure_agent_auth` is imported at module level for test monkeypatch
+    # clarity — see agents/orchestrator.py top.
     for name in agent_names:
         ensure_agent_auth(name)
 

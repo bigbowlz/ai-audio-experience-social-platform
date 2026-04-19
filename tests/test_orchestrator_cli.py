@@ -54,32 +54,43 @@ def test_youtube_only_flag_selects_youtube_only():
 
 def test_cli_main_calls_preflight_once_per_active_agent(monkeypatch):
     """Every activated agent triggers its preflight exactly once, before
-    the agent is instantiated. Preserves the weather→calendar→youtube order."""
+    the agent is instantiated. Preserves the weather→calendar→youtube order.
+
+    Patches `agents.orchestrator.ensure_agent_auth` directly (the name as it
+    is bound inside the module after the top-level import) so the test isn't
+    relying on sys.modules cache side effects.
+    """
+    from unittest.mock import Mock
     import agents.orchestrator as orch
 
     calls: list[str] = []
     monkeypatch.setattr(
-        "auth.preflight.ensure_agent_auth",
-        lambda name: calls.append(name),
+        orch, "ensure_agent_auth", lambda name: calls.append(name)
     )
 
-    # Stub the heavy path: replace run_episode + everything after it.
+    # Stub run_episode + subscribe so we don't actually hit agents / TTS /
+    # the producer LLM. run_episode's stubbed return feeds empty dicts into
+    # downstream code — we force that downstream code to short-circuit
+    # cleanly via a controlled KeyError (see next monkeypatch).
     monkeypatch.setattr(
         orch, "run_episode",
         lambda *a, **k: ({}, {"today_context": {}, "user_profile": None}),
     )
-    # Also stub subscribe so we don't spam stdout with JsonlSink output.
     monkeypatch.setattr("producer.events.subscribe", lambda *_a, **_k: None)
-    # Force an exception downstream so the raises guard is satisfied; we only
-    # care that preflight was invoked before this point.
+    # Controlled downstream short-circuit: the first load after preflight is
+    # load_producer_memory. A mock with side_effect raises cleanly on call.
     monkeypatch.setattr(
         "producer.memory.load_producer_memory",
-        lambda *_a, **_k: (_ for _ in ()).throw(KeyError("stubbed")),
+        Mock(side_effect=KeyError("stubbed — test short-circuit after preflight")),
     )
 
-    # SystemExit is acceptable: downstream producer.memory / bonus / script
-    # modules are stubbed-away via run_episode returning empty dicts, which
-    # causes various KeyErrors downstream. We only assert preflight order.
-    with pytest.raises((SystemExit, KeyError, IndexError, AttributeError, TypeError)):
+    # Narrow exception type: only KeyError is expected from our stub. A
+    # wider tuple here would mask genuine TypeError/AttributeError bugs
+    # in the preflight wiring (e.g., ensure_agent_auth called with the
+    # wrong arg type).
+    with pytest.raises(KeyError, match="stubbed"):
         orch.cli_main(["--weather", "--calendar", "--no-llm", "--no-external"])
+    # Assertion runs outside the raises block, after cli_main raises — but
+    # the preflight loop fires BEFORE load_producer_memory, so `calls` is
+    # fully populated by the time the KeyError fires.
     assert calls == ["weather", "calendar"]
