@@ -143,25 +143,38 @@ class TestSystemPrompt:
                 f"legend still carries removed field: {removed!r}"
             )
 
-    def test_has_per_agent_data_crib(self):
-        """Each agent appears in a data-crib context."""
-        for agent in ("weather", "calendar", "youtube", "alices"):
-            assert agent in SYSTEM_PROMPT, f"missing agent in crib: {agent!r}"
-        assert "data.current" in SYSTEM_PROMPT
-        assert "data.events" in SYSTEM_PROMPT
-        assert "notable_facts" in SYSTEM_PROMPT
+    def test_system_prompt_scoped_to_taste_segments(self):
+        """SYSTEM_PROMPT is the taste-segment prompt (youtube / alices only).
+
+        Weather and calendar data schemas and thin_signal handling live in
+        OPENER_SYSTEM_PROMPT — they never reach generate_segment in v0.
+        See producer/docs/DESIGN.md §Opener fusion.
+        """
+        # Taste agents are referenced in their sections (provenance, claim_kind,
+        # thin_signal close lines).
+        for agent in ("youtube", "alices"):
+            assert agent in SYSTEM_PROMPT, f"missing taste agent: {agent!r}"
+        # Explicit scope declaration near the top.
+        assert "TASTE segments only" in SYSTEM_PROMPT
+
+    def test_weather_calendar_schema_lives_in_opener_prompt(self):
+        """data.current / data.events / notable_facts belong to the opener."""
+        from producer.prompts import OPENER_SYSTEM_PROMPT
+
+        assert "data.current" in OPENER_SYSTEM_PROMPT
+        assert "data.events" in OPENER_SYSTEM_PROMPT
+        assert "notable_facts" in OPENER_SYSTEM_PROMPT
 
     def test_has_thin_signal_handling(self):
-        """thin_signal handling block names per-agent nudge phrasings."""
+        """thin_signal handling block names per-taste-agent nudge phrasings."""
         assert "thin_signal" in SYSTEM_PROMPT
         assert "more personal as your YouTube activity grows" in SYSTEM_PROMPT
-        assert "Local forecast wasn't available today" in SYSTEM_PROMPT
+        # Weather thin_signal lives in the opener prompt, not here.
 
     def test_has_hook_data_layering_rule(self):
-        """Hook vs data layering rule key phrases present."""
+        """Hook vs data layering rule key phrases present (taste-scoped)."""
         assert "phrasing ceiling" in SYSTEM_PROMPT
         assert "read-only context" in SYSTEM_PROMPT
-        assert "content source" in SYSTEM_PROMPT
 
     def test_has_web_search_usage_block(self):
         """System prompt instructs the model on web_search tool usage + query rules."""
@@ -174,17 +187,29 @@ class TestSystemPrompt:
         assert "broaden" in SYSTEM_PROMPT.lower()
 
     def test_has_narration_contract_block(self):
-        """Narration contract beats: lead → factual body → flex band → takeaway."""
-        prompt_lower = SYSTEM_PROMPT.lower()
-        for beat in ("lead", "factual body", "flex band", "takeaway"):
-            assert beat in prompt_lower, f"missing narration beat: {beat!r}"
+        """Narration contract beats (post-2026-04-19 storytelling rename):
+        strong hook → build → breather → high note / takeaway.
 
-    def test_has_source_recitation_rule(self):
-        """Listener proper nouns NOT spoken inside the story body."""
+        Prior beat names (lead / factual body / flex band / takeaway) were
+        renamed when the storytelling best-practices (Q→A rhythm, authentic
+        fillers, pacing arc) were folded into the segment prompt.
+        """
         prompt_lower = SYSTEM_PROMPT.lower()
-        # Explicit rule forbidding recitation of channel names / video titles / source_refs.
-        assert "recit" in prompt_lower  # matches "recite" / "recitation"
+        for beat in ("strong hook", "build", "breather", "high note"):
+            assert beat in prompt_lower, f"missing narration beat: {beat!r}"
+        # takeaway is still referenced (claim_kind directives bound takeaway framing).
+        assert "takeaway" in prompt_lower
+
+    def test_has_source_refs_personalization_guidance(self):
+        """Listener proper nouns ARE referenced in narration (post-pivot) —
+        the prompt encourages referencing source_refs while advising against
+        mechanical recitation of the full list.
+        """
+        prompt_lower = SYSTEM_PROMPT.lower()
+        # "avoid reciting the full list" — guidance on *how* to use, not whether.
+        assert "recit" in prompt_lower  # matches "reciting" / "recitation"
         assert "source_refs" in SYSTEM_PROMPT
+        assert "personalization" in prompt_lower
 
     def test_has_json_safety_rules(self):
         """Output schema section instructs the model on JSON escaping discipline.
