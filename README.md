@@ -14,9 +14,9 @@ Absent flag → that agent is skipped. You must pass at least one.
 
 **Auth prereqs — the CLI runs each the first time you activate its agent:**
 
-- `--weather`: browser geolocation flow (artifact: `~/.config/radio-podcast/weather_location.json`)
-- `--calendar`: Google OAuth flow (artifact: `~/.config/radio-podcast/calendar_token.json`)
-- `--youtube`: YouTube Data API OAuth + capture (requires `tmp/DPAPI/credentials.json`; artifact: `tmp/ydata/probe_1776208130/02_subscriptions.json` or `$YOUTUBE_PROBE_DIR`)
+- `--weather`: browser geolocation flow (artifact will be stored: `~/.config/radio-podcast/weather_location.json`)
+- `--calendar`: Google OAuth flow (artifact will be stored: `~/.config/radio-podcast/calendar_token.json`); please contact Wanli to get your google account added to the app to use OAuthl
+- `--youtube`: YouTube Data API OAuth + capture (requires `tmp/DPAPI/credentials.json`; artifact will be stored: `tmp/ydata/probe_1776208130/02_subscriptions.json` or `$YOUTUBE_PROBE_DIR`); please contact Wanli to get your google account added to the app to use OAuth
 
 **Playback hotkeys (during `afplay` playback):**
 
@@ -43,6 +43,14 @@ rm -f ~/.config/radio-podcast/calendar_token.json \
        ~/.config/radio-podcast/weather_location.json && \
 rm -rf tmp/ydata/
 ```
+
+**Remove prior memory (agent + producer layers):**
+
+```
+rm -rf data/agent_memory/ data/signals/
+```
+
+Agent memory lives at `data/agent_memory/{user_id}/{agent}.json` (v0 scaffold — reads return `{}` until learning-loop unstubs in v1). Producer memory is hydrated each run from `data/signals/{user_id}/*.jsonl`; deleting the signals log resets agent-weight re-ordering to the bootstrap identity.
 
 **Output locations:**
 

@@ -31,6 +31,17 @@ VOICE_SETTINGS: dict = {
     "use_speaker_boost": True,
 }
 
+# Per-voice overrides merged on top of VOICE_SETTINGS. Use this to tune
+# individual voices (e.g. speed) without affecting the rest.
+VOICE_SETTINGS_OVERRIDES: dict[str, dict] = {
+    GUEST_VOICE_ID: {"speed": 1.05},
+}
+
+
+def resolve_voice_settings(voice_id: str) -> dict:
+    """Return VOICE_SETTINGS merged with any per-voice overrides."""
+    return {**VOICE_SETTINGS, **VOICE_SETTINGS_OVERRIDES.get(voice_id, {})}
+
 # Per-request timeout (seconds). Spec: 60s per request.
 REQUEST_TIMEOUT_SEC = 60
 
