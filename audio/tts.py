@@ -23,7 +23,7 @@ from audio.config import (
     OUTPUT_FORMAT,
     REQUEST_TIMEOUT_SEC,
     RETRY_BACKOFF_BASE_SEC,
-    VOICE_SETTINGS,
+    resolve_voice_settings,
 )
 from audio.pronunciation import apply_pronunciation
 
@@ -99,6 +99,7 @@ class TTSClient:
         processed_text = apply_pronunciation(text)
         char_count = len(processed_text)
         billed_chars = 0
+        voice_settings = resolve_voice_settings(voice_id)
 
         # Prepare output path
         episode_dir = self._output_dir / episode_id
@@ -120,7 +121,7 @@ class TTSClient:
                             voice_id=voice_id,
                             text=processed_text,
                             model_id=self._model_id,
-                            voice_settings=VOICE_SETTINGS,
+                            voice_settings=voice_settings,
                             output_format=OUTPUT_FORMAT,
                         ),
                     ),

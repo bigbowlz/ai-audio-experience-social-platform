@@ -16,3 +16,10 @@ exports/
 # v0 CLI storage (local-filesystem; api-storage deferred to v1)
 /data/
 /exports/
+
+.pytest_cache
+
+.claude
+docs/comparison.md
+docs/superpowers/
+docs/script-zk.md
