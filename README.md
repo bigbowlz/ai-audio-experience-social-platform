@@ -75,4 +75,4 @@ Agent memory lives at `data/agent_memory/{user_id}/{agent}.json` (v0 scaffold â€
 - `ffmpeg` on PATH (for MP3 concat export)
 - ElevenLabs API key (`ELEVENLABS_API_KEY`)
 - Anthropic API key (`ANTHROPIC_API_KEY`)
-- YouTube Data API credentials (`tmp/DPAPI/credentials.json`) for `--youtube`
+- YouTube Data API credentials (`tmp/DPAPI/credentials.json`) for `--youtube` - please contact Wanli for access
