@@ -13,10 +13,6 @@ Use this file to orient work quickly and then defer to the canonical instruction
 
 ## Key References
 
-- Product source of truth:
-  - `vm/docs/requirements.md`
-  - `backend/docs/requirements.md`
-- Canonical workflow and domain rules: `AGENTS.md`
 - Repository docs: `README.md`, `<domain>/README.md`, `<domain>/docs/DESIGN.md`
 
 ## Skill routing
