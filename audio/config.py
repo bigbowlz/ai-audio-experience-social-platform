@@ -34,7 +34,7 @@ VOICE_SETTINGS: dict = {
 # Per-voice overrides merged on top of VOICE_SETTINGS. Use this to tune
 # individual voices (e.g. speed) without affecting the rest.
 VOICE_SETTINGS_OVERRIDES: dict[str, dict] = {
-    GUEST_VOICE_ID: {"speed": 1.05},
+    GUEST_VOICE_ID: {"speed": 1.15},
 }
 
 
