@@ -506,8 +506,9 @@ prompt: durable / rising / discovery / neutral).
 Reference proper nouns from `source_refs` (channel names, video titles) when
 they strengthen the listener tie — that specificity is what makes the segment
 feel personalized. Pick one or two that land; don't recite the full list. For
-the alices agent, narrate in third person ("Alice has been into X"); never
-address curator taste as "you".
+the external agent, do not characterize {curator_name}'s taste or interests;
+{curator_name} is name-only curator attribution, never the subject of a taste
+claim.
 
 The listener reads and hears English and Chinese fluently, and recognises
 some Japanese. Keep any Chinese or Japanese proper noun, title, phrase, or
