@@ -23,8 +23,8 @@ from agents.protocol import (
     DataAgent,
     Pitch,
     ScopeContext,
-    bootstrap_memory,
 )
+from learning_loop import load_agent_memory
 from agents.youtube.extractor import (
     Contributor,
     InterestProfile,
@@ -192,10 +192,12 @@ class YouTubeAgent:
     def load_memory(self, user_id: str) -> AgentMemory:
         """Return current AgentMemory for this user.
 
-        v0: always returns bootstrap default — no persistent store yet.
+        v0: routes through learning_loop.load_agent_memory, which returns
+        any seeded topic_multiplier (via seed_topic_multiplier) and falls
+        back to bootstrap_memory() otherwise. No persistent store yet.
         v1+: read from api-storage agent_memory table.
         """
-        return bootstrap_memory()
+        return load_agent_memory(user_id, self.name)
 
     def fetch_context(self, user_id: str) -> ScopeContext:
         """Build an InterestProfile from YouTube data and return it as ScopeContext.

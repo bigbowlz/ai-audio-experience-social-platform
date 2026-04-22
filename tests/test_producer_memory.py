@@ -148,17 +148,17 @@ class TestApplyReaderScaling:
         assert priorities == sorted(priorities, reverse=True)
 
     def test_cross_agent_bonus_reorder(self):
-        # Before: alices 0.7 > youtube 0.5. After ×1.5 youtube: 0.75 > 0.7.
+        # Before: external 0.7 > youtube 0.5. After ×1.5 youtube: 0.75 > 0.7.
         pitches = {
             "youtube": [_pitch("youtube", "y", 0.5)],
-            "alices": [_pitch("alices", "p", 0.7)],
+            "external": [_pitch("external", "p", 0.7)],
         }
         out = apply_producer_memory(
-            pitches, _mem({"youtube": 1.5, "alices": 1.0})
+            pitches, _mem({"youtube": 1.5, "external": 1.0})
         )
         assert out["youtube"][0]["priority"] == pytest.approx(0.75)
-        assert out["alices"][0]["priority"] == pytest.approx(0.7)
-        assert out["youtube"][0]["priority"] > out["alices"][0]["priority"]
+        assert out["external"][0]["priority"] == pytest.approx(0.7)
+        assert out["youtube"][0]["priority"] > out["external"][0]["priority"]
 
 
 class TestApplyReaderClamping:
@@ -262,27 +262,27 @@ class TestPipelineBonusSlotFlip:
         # 2 agents × 2 pitches, all segs forced to 40s so each bonus pitch costs 50
         # (40 + 10 segue). Budget = 50 → exactly ONE bonus slot fits.
         #
-        # Raw #2 priorities: alices 0.80 > youtube 0.70.
-        # Without weights, alices' #2 pitch wins the single bonus slot.
+        # Raw #2 priorities: external 0.80 > youtube 0.70.
+        # Without weights, external' #2 pitch wins the single bonus slot.
         pitches = {
             "youtube": [
                 _pitch("youtube", "yt-1", 0.95),
                 _pitch("youtube", "yt-2", 0.70),
             ],
-            "alices": [
-                _pitch("alices", "p-1", 0.92),
-                _pitch("alices", "p-2", 0.80),
+            "external": [
+                _pitch("external", "p-1", 0.92),
+                _pitch("external", "p-2", 0.80),
             ],
         }
-        overrides = {"youtube": 40, "alices": 40}
+        overrides = {"youtube": 40, "external": 40}
 
         neutral = self._run_pipeline(
             pitches, _mem({}), length_overrides=overrides, budget_override=50
         )
         bonus_agents_neutral = [p["agent"] for p in neutral[2:]]  # skip 2 guaranteed
-        assert bonus_agents_neutral == ["alices"]
+        assert bonus_agents_neutral == ["external"]
 
-        # Boost youtube ×1.5 → yt-2 effective priority 1.05, beats alices 0.80.
+        # Boost youtube ×1.5 → yt-2 effective priority 1.05, beats external 0.80.
         boosted = self._run_pipeline(
             pitches,
             _mem({"youtube": 1.5}),
@@ -296,7 +296,7 @@ class TestPipelineBonusSlotFlip:
         guaranteed_agents_neutral = {p["agent"] for p in neutral[:2]}
         guaranteed_agents_boosted = {p["agent"] for p in boosted[:2]}
         assert guaranteed_agents_neutral == guaranteed_agents_boosted == {
-            "youtube", "alices"
+            "youtube", "external"
         }
 
 
@@ -427,15 +427,15 @@ class TestBuildMemoryAppliedEvent:
     def test_skips_agents_missing_from_pitches(self):
         """Weights for an agent without any pitches this episode → skipped in changes."""
         raw = {"youtube": [_pitch("youtube", "a", 0.9)]}
-        adj = apply_producer_memory(raw, _mem({"youtube": 1.5, "alices": 0.8}))
+        adj = apply_producer_memory(raw, _mem({"youtube": 1.5, "external": 0.8}))
         event = build_memory_applied_event(
-            _mem({"youtube": 1.5, "alices": 0.8}), raw, adj
+            _mem({"youtube": 1.5, "external": 0.8}), raw, adj
         )
         assert event is not None
         change_agents = {c["agent"] for c in event["changes"]}
         assert change_agents == {"youtube"}
-        # agent_weights still includes alices for UI reconciliation.
-        assert "alices" in event["agent_weights"]
+        # agent_weights still includes external for UI reconciliation.
+        assert "external" in event["agent_weights"]
 
     def test_emit_memory_applied_silent_when_weights_empty(self):
         """Bootstrap users emit nothing — silent identity transform."""

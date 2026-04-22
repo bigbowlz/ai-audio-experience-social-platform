@@ -27,7 +27,7 @@ def test_query_marketplace_returns_hardcoded_listings():
     assert "@GoddamnAxl" in handles
 
 
-def test_select_external_returns_alices_in_v0():
+def test_select_external_returns_curator_in_v0():
     listings = query_marketplace()
     chosen = select_external(
         listings,

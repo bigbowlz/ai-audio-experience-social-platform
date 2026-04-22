@@ -1,8 +1,15 @@
-"""AlicesAgent: external creator agent backed by Alice's YouTube data.
+"""ExternalAgent: external creator agent backed by pre-captured YouTube data.
 
 Shares the extraction pipeline with YouTubeAgent but loads pre-captured
 Day-0 JSON instead of live OAuth. Implements the DataAgent protocol with
 external=True, price_usdc=0.10, and a Base Sepolia wallet_address.
+
+Curator identity (CURATOR_NAME / CURATOR_HANDLE / LISTENER_HANDLE) lives
+in agents/external/identity.py and is re-exported here for convenience.
+Producer prompt rendering reads those constants to substitute the
+`{curator_name}`, `{curator_handle}`, and `{user_handle}` placeholders in
+producer/prompts.py. v1 will source these per-user from marketplace
+metadata and listener profile.
 
 Spec: agents/youtube/docs/DESIGN.md §Shared extractor
       agents/docs/DESIGN.md §Interface contract
@@ -18,14 +25,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
 
+from agents.external.identity import (  # re-exported for callers
+    CURATOR_HANDLE,
+    CURATOR_NAME,
+    LISTENER_HANDLE,
+)
 from agents.protocol import (
     AgentMemory,
     Brief,
     DataAgent,
     Pitch,
     ScopeContext,
-    bootstrap_memory,
 )
+from learning_loop import load_agent_memory
 from agents.youtube.extractor import (
     Contributor,
     InterestProfile,
@@ -41,12 +53,13 @@ from agents.youtube.llm import generate_pitches as llm_generate_pitches
 
 log = logging.getLogger(__name__)
 
+
 # ── Data path ────────────────────────────────────────────────────────
-# Override via PATRICKS_DATA_DIR env var; defaults to committed Day-0 data.
+# Override via EXTERNAL_DATA_DIR env var; defaults to committed Day-0 data.
 
 _HERE = Path(__file__).resolve().parent
 _DEFAULT_DATA_DIR = _HERE / "data"
-DATA_DIR = Path(os.environ.get("PATRICKS_DATA_DIR", _DEFAULT_DATA_DIR))
+DATA_DIR = Path(os.environ.get("EXTERNAL_DATA_DIR", _DEFAULT_DATA_DIR))
 
 # ── Algo constants (same as YouTubeAgent) ────────────────────────────
 
@@ -61,7 +74,7 @@ MIN_PITCHES = 3
 def _load_data(
     data_dir: Path,
 ) -> tuple[list[dict], list[dict], dict[str, list[str]], dict[str, list[str]]]:
-    """Load Alice's captured JSON and return (subs, likes, channel_topics, video_topics).
+    """Load captured JSON and return (subs, likes, channel_topics, video_topics).
 
     Same format as YouTubeAgent's _load_probe_data — both consume the
     shared extractor's input contract.
@@ -115,9 +128,10 @@ def _template_hook(
 ) -> str:
     """Structured what/source/goal brief to the Producer.
 
-    External-curator semantics are explicit: this pitch reflects Alice's
-    taste, NOT the listener's — the Producer must narrate it as curator
-    recommendation, never as "here's something you searched for".
+    External-curator semantics are explicit: this pitch reflects the
+    curator's taste, NOT the listener's — the Producer must narrate it
+    as a curator recommendation, never as "here's something you searched
+    for".
     """
     label = _topic_label(topic)
     subs = [c for c in contributors if c["kind"] == "sub"]
@@ -125,7 +139,7 @@ def _template_hook(
 
     if claim_kind == ClaimKind.RISING:
         ref = likes[0]["channel_name"] if likes else label
-        evidence = f"{ref} trending in Alice's recent likes"
+        evidence = f"{ref} trending in {CURATOR_NAME}'s recent likes"
     elif claim_kind == ClaimKind.DISCOVERY:
         if likes and likes[0]["video_title"]:
             ref = f'"{likes[0]["video_title"]}" on {likes[0]["channel_name"]}'
@@ -133,25 +147,25 @@ def _template_hook(
             ref = likes[0]["channel_name"]
         else:
             ref = label
-        evidence = f"Alice recently surfaced {ref}"
+        evidence = f"{CURATOR_NAME} recently surfaced {ref}"
     elif claim_kind == ClaimKind.DURABLE:
         ref = subs[0]["channel_name"] if subs else label
         since = ""
         if subs and subs[0].get("subscribed_at"):
             since = f" (since {subs[0]['subscribed_at'][:4]})"
-        evidence = f"Alice has been subscribed to {ref}{since}"
+        evidence = f"{CURATOR_NAME} has been subscribed to {ref}{since}"
     else:  # NEUTRAL
         if contributors:
             ref = contributors[0]["channel_name"]
-            evidence = f"{label} appeared in Alice's YouTube activity via {ref}"
+            evidence = f"{label} appeared in {CURATOR_NAME}'s YouTube activity via {ref}"
         else:
-            evidence = f"{label} appeared in Alice's YouTube data"
+            evidence = f"{label} appeared in {CURATOR_NAME}'s YouTube data"
 
     return (
         f"WHAT: Curator recommendation on {label} (claim_kind={claim_kind.value}) — {evidence}.\n"
-        f"SOURCE: @GoddamnAxl (external curator, pre-captured Day-0 data) — NOT the listener's own interest.\n"
-        f"GOAL: Expose the listener to Alice's taste. "
-        f"Narrate as curator pick ('Alice's been into X', 'Alice flagged Y'), "
+        f"SOURCE: {CURATOR_HANDLE} (external curator, pre-captured Day-0 data) — NOT the listener's own interest.\n"
+        f"GOAL: Expose the listener to {CURATOR_NAME}'s taste. "
+        f"Narrate as curator pick ('{CURATOR_NAME}'s been into X', '{CURATOR_NAME} flagged Y'), "
         f"never as listener taste ('you've been into X'). "
         f"Respect claim_kind directives for temporal framing."
     )
@@ -162,13 +176,13 @@ def _template_hook(
 
 def _thin_signal_pitch() -> Pitch:
     return Pitch(
-        agent="alices",
-        title="Alice's YouTube world",
+        agent="external",
+        title=f"{CURATOR_NAME}'s YouTube world",
         hook=(
-            "WHAT: General-interest curator segment in Alice's domain (photography, travel, tech). "
+            f"WHAT: General-interest curator segment in {CURATOR_NAME}'s domain. "
             "No specific topic ranking available.\n"
-            "SOURCE: @GoddamnAxl (external curator, pre-captured Day-0 data) — NOT the listener's own interest.\n"
-            "GOAL: Write a general-interest segment framed as Alice's curator voice. "
+            f"SOURCE: {CURATOR_HANDLE} (external curator, pre-captured Day-0 data) — NOT the listener's own interest.\n"
+            f"GOAL: Write a general-interest segment framed as {CURATOR_NAME}'s curator voice. "
             "Do not personalize to the listener; no channels/subs/videos by name."
         ),
         source_refs=[],
@@ -179,21 +193,21 @@ def _thin_signal_pitch() -> Pitch:
     )
 
 
-# ── AlicesAgent ────────────────────────────────────────────────────
+# ── ExternalAgent ────────────────────────────────────────────────────
 
 
-class AlicesAgent:
-    """External creator agent backed by Alice's pre-captured YouTube data."""
+class ExternalAgent:
+    """External creator agent backed by pre-captured YouTube data."""
 
-    name: str = "alices"
-    display_name: str = "@GoddamnAxl"
-    scope: str = "Alice's YouTube world — photography, travel, tech"
+    name: str = "external"
+    display_name: str = CURATOR_HANDLE
+    scope: str = f"{CURATOR_NAME}'s YouTube world"
     external: bool = True
     price_usdc: float | None = 0.10
     wallet_address: str | None = "0x8043AeeD92c681492B13f46e91EFb8B42D18E3b2"
 
     def load_memory(self, user_id: str) -> AgentMemory:
-        return bootstrap_memory()
+        return load_agent_memory(user_id, self.name)
 
     def fetch_context(self, user_id: str) -> ScopeContext:
         now = datetime.now(timezone.utc)
@@ -250,7 +264,7 @@ class AlicesAgent:
 
         # ── Step 2: LLM selection + hook generation ──────────────────
         try:
-            pitches = llm_generate_pitches(bundle, brief, agent_name="alices")
+            pitches = llm_generate_pitches(bundle, brief, agent_name="external")
             if MIN_PITCHES <= len(pitches) <= MAX_PITCHES:
                 return pitches
             log.warning(
@@ -286,7 +300,7 @@ class AlicesAgent:
 
             pitches_fallback.append(
                 Pitch(
-                    agent="alices",
+                    agent="external",
                     title=_topic_label(topic).title(),
                     hook=hook,
                     source_refs=list(dict.fromkeys(source_refs)),

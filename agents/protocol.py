@@ -69,7 +69,7 @@ class ScopeContext(TypedDict, total=False):
 
 
 class Pitch(TypedDict, total=False):
-    agent: str  # "youtube" | "calendar" | "weather" | "alices"
+    agent: str  # "youtube" | "calendar" | "weather" | "external"
     title: str
     hook: str  # creative brief for Producer — not spoken verbatim
     data: dict  # structured payload; agent-specific (e.g. calendar events)
@@ -167,8 +167,8 @@ def bootstrap_memory() -> AgentMemory:
 
 @runtime_checkable
 class DataAgent(Protocol):
-    name: str  # "youtube" | "calendar" | "weather" | "alices"
-    display_name: str  # "@YouTube" | "@GoddamnAxl"
+    name: str  # "youtube" | "calendar" | "weather" | "external"
+    display_name: str  # "@YouTube" | curator handle (e.g. "@GoddamnAxl")
     scope: str  # human-readable scope description
     external: bool  # True for creator agents only
     price_usdc: float | None  # None for internal agents
@@ -196,7 +196,7 @@ class DataAgent(Protocol):
     ) -> list[Pitch]:
         """Return 3–5 ranked Pitches, or exactly 1 thin-signal Pitch.
 
-        Never any other cardinality for topic-scored agents (youtube, alices).
+        Never any other cardinality for topic-scored agents (youtube, external).
         Context agents (weather, calendar) may return 1 non-thin-signal pitch
         when their scope is inherently singular (one subject, not insufficient data).
         See agents/youtube/docs/DESIGN.md §pitch() flow.

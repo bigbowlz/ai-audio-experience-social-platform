@@ -62,7 +62,7 @@ class PrettySink:
         ▸ producer.marketplace.queried
           candidates:
             [0]:
-              handle: alices
+              handle: "@GoddamnAxl"
               price_usdc: 0.1
           reasoning_summary: 1 candidate available
     """

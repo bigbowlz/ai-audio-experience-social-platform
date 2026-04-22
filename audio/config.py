@@ -7,7 +7,7 @@ NARRATOR_VOICE_ID = (
     # "SAz9YHcvj6GT2YYXdXww"  # River — picked as narrator (dev's segments)
 )
 GUEST_VOICE_ID = "Dslrhjl3ZpzrctukrQSN"  # paid
-# "EXAVITQu4vr4xnSDxMaL"  # Sarah — picked as Alice (@GoddamnAxl)
+# "EXAVITQu4vr4xnSDxMaL"  # Sarah — picked for the external curator
 
 ELEVENLABS_MODEL = (
     "eleven_turbo_v2_5"  # probe p50: 0.95s; flash identical but turbo is design default
@@ -15,12 +15,12 @@ ELEVENLABS_MODEL = (
 OUTPUT_FORMAT = "mp3_44100_128"  # 22050_32 rated 1/5 on headphones test — dropped
 
 # Orchestrator resolves voice per segment via this map.
-# All agents default to narrator. Alice's agent uses guest voice.
+# All agents default to narrator. The external curator agent uses guest voice.
 VOICE_MAP: dict[str, str] = {
     "youtube": NARRATOR_VOICE_ID,
     "calendar": NARRATOR_VOICE_ID,
     "weather": NARRATOR_VOICE_ID,
-    "alices": GUEST_VOICE_ID,
+    "external": GUEST_VOICE_ID,
 }
 
 # Voice synthesis settings. Tune stability during rehearsals (0.4/0.6/0.8).
@@ -41,6 +41,7 @@ VOICE_SETTINGS_OVERRIDES: dict[str, dict] = {
 def resolve_voice_settings(voice_id: str) -> dict:
     """Return VOICE_SETTINGS merged with any per-voice overrides."""
     return {**VOICE_SETTINGS, **VOICE_SETTINGS_OVERRIDES.get(voice_id, {})}
+
 
 # Per-request timeout (seconds). Spec: 60s per request.
 REQUEST_TIMEOUT_SEC = 60

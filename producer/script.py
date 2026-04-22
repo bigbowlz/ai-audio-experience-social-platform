@@ -6,7 +6,7 @@ Two-step pipeline (prompt_design.md §4):
 
 DISABLE_LLM semantics: this module raises RuntimeError on DISABLE_LLM=1 at every
 entry point — there is no deterministic script fallback. Research-based
-narration for youtube/alices segments is LLM-only by construction (the model
+narration for youtube/external segments is LLM-only by construction (the model
 calls the web_search tool inside the same messages.create call); there is no
 offline equivalent, so callers must gate upstream as agents/orchestrator.py
 does via args.no_llm. See docs/specs/2026-04-18-producer-news-narration-design.md.
@@ -24,6 +24,7 @@ from typing import AsyncIterator, TypedDict
 
 import anthropic
 
+from agents.external.identity import CURATOR_HANDLE, CURATOR_NAME, LISTENER_HANDLE
 from agents.protocol import Brief, Pitch
 from producer import DEFAULT_LLM_MODEL, words_per_min
 from producer.events import emit
@@ -37,6 +38,27 @@ from producer.prompts import (
     SIGN_OFF_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
 )
+
+
+# ── Prompt identity rendering ────────────────────────────────────────
+#
+# SYSTEM_PROMPT contains literal `{` / `}` characters inside its JSON
+# examples, so str.format is unsafe. We substitute the three identity
+# placeholders by literal string replace. OPENER and SIGN_OFF have no
+# literal braces and keep using .format() for {target_words}.
+
+_IDENTITY_SUBSTITUTIONS = {
+    "{user_handle}": LISTENER_HANDLE,
+    "{curator_handle}": CURATOR_HANDLE,
+    "{curator_name}": CURATOR_NAME,
+}
+
+
+def _render_identities(template: str) -> str:
+    """Substitute identity placeholders in a prompt template."""
+    for placeholder, value in _IDENTITY_SUBSTITUTIONS.items():
+        template = template.replace(placeholder, value)
+    return template
 
 # ── Output types ─────────────────────────────────────────────────────
 
@@ -396,7 +418,7 @@ async def _hook_fallback_narration(
         _client.messages.create,
         model=MODEL,
         max_tokens=1024,
-        system=HOOK_FALLBACK_SYSTEM_PROMPT,
+        system=_render_identities(HOOK_FALLBACK_SYSTEM_PROMPT),
         messages=[{"role": "user", "content": json.dumps(payload, indent=2)}],
         timeout=20.0,
     )
@@ -492,7 +514,7 @@ async def generate_segment(
         system=[
             {
                 "type": "text",
-                "text": SYSTEM_PROMPT,
+                "text": _render_identities(SYSTEM_PROMPT),
                 "cache_control": {"type": "ephemeral"},
             }
         ],
@@ -711,6 +733,7 @@ def _render_opener_system_prompt() -> str:
     """
     return OPENER_SYSTEM_PROMPT.format(
         target_words=_target_words(_OPENER_DURATION_SEC),
+        curator_name=CURATOR_NAME,
     )
 
 

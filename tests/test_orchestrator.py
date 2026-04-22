@@ -137,13 +137,13 @@ class TestGenerateEpisodeAudio:
         mock_tts = AsyncMock()
         mock_tts.synthesize = AsyncMock(return_value=_make_result(0))
 
-        segments = [_make_segment("alices", "Alice's take", 0)]
+        segments = [_make_segment("external", "curator take", 0)]
         await generate_episode_audio(
             tts=mock_tts, segments=_as_stream(segments), episode_id="ep1",
         )
         call_kwargs = mock_tts.synthesize.call_args
-        # alices agent should use GUEST_VOICE_ID
-        assert call_kwargs.kwargs["voice_id"] == VOICE_MAP["alices"]
+        # external agent should use GUEST_VOICE_ID
+        assert call_kwargs.kwargs["voice_id"] == VOICE_MAP["external"]
 
     @pytest.mark.asyncio
     async def test_collects_billed_characters(self):

@@ -144,7 +144,7 @@ class TestSystemPrompt:
             )
 
     def test_system_prompt_scoped_to_taste_segments(self):
-        """SYSTEM_PROMPT is the taste-segment prompt (youtube / alices only).
+        """SYSTEM_PROMPT is the taste-segment prompt (youtube / external only).
 
         Weather and calendar data schemas and thin_signal handling live in
         OPENER_SYSTEM_PROMPT — they never reach generate_segment in v0.
@@ -152,7 +152,7 @@ class TestSystemPrompt:
         """
         # Taste agents are referenced in their sections (provenance, claim_kind,
         # thin_signal close lines).
-        for agent in ("youtube", "alices"):
+        for agent in ("youtube", "external"):
             assert agent in SYSTEM_PROMPT, f"missing taste agent: {agent!r}"
         # Explicit scope declaration near the top.
         assert "TASTE segments only" in SYSTEM_PROMPT
@@ -234,7 +234,7 @@ class TestSystemPrompt:
         real personalization and should be referenced where they sharpen
         the tie. claim_kind still bounds what claims the takeaway can make.
         """
-        assert "Personalization via `source_refs`" in SYSTEM_PROMPT
+        assert "Personalized ties via `source_refs`" in SYSTEM_PROMPT
         prompt_lower = SYSTEM_PROMPT.lower()
         assert "encouraged" in prompt_lower
         # claim_kind discipline preserved — no invented durability claims.
@@ -368,11 +368,11 @@ class TestSplitOpenerInputs:
         weather = _full_pitch(agent="weather", title="Weather in SF")
         calendar = _full_pitch(agent="calendar", title="Today's schedule")
         youtube = _full_pitch(agent="youtube", title="Jazz")
-        alices = _full_pitch(agent="alices", title="PG essay")
-        w, c, content = split_opener_inputs([weather, calendar, youtube, alices])
+        external = _full_pitch(agent="external", title="PG essay")
+        w, c, content = split_opener_inputs([weather, calendar, youtube, external])
         assert w is weather
         assert c is calendar
-        assert content == [youtube, alices]
+        assert content == [youtube, external]
 
     def test_returns_none_when_opener_input_absent(self):
         youtube = _full_pitch(agent="youtube", title="Jazz")
@@ -382,10 +382,10 @@ class TestSplitOpenerInputs:
         assert content == [youtube]
 
     def test_preserves_order_within_content(self):
-        alices = _full_pitch(agent="alices", title="PG")
+        external = _full_pitch(agent="external", title="PG")
         youtube = _full_pitch(agent="youtube", title="Jazz")
-        _, _, content = split_opener_inputs([alices, youtube])
-        assert content == [alices, youtube]
+        _, _, content = split_opener_inputs([external, youtube])
+        assert content == [external, youtube]
 
     def test_picks_first_when_multiple_weather_or_calendar_pitches(self):
         """Guaranteed-slots flow emits one per agent; but the split is defensive."""
@@ -407,7 +407,7 @@ class TestGenerateEpisodeScriptRouting:
         weather = _full_pitch(agent="weather", title="Weather in SF")
         calendar = _full_pitch(agent="calendar", title="Today's schedule")
         youtube = _full_pitch(agent="youtube", title="Jazz")
-        alices = _full_pitch(agent="alices", title="PG essay")
+        external = _full_pitch(agent="external", title="PG essay")
 
         opener_call = {}
         stream_call = {}
@@ -435,16 +435,16 @@ class TestGenerateEpisodeScriptRouting:
         monkeypatch.setattr("producer.script.stream_episode_script", capture_stream)
 
         episode = generate_episode_script(
-            [weather, calendar, youtube, alices], _BRIEF
+            [weather, calendar, youtube, external], _BRIEF
         )
 
         assert opener_call["weather"] is weather
         assert opener_call["calendar"] is calendar
         assert opener_call["first"] is youtube
-        assert stream_call["selected"] == [youtube, alices]
+        assert stream_call["selected"] == [youtube, external]
         assert episode["opener"] == "o" * 250
         assert episode["sign_off"] == "bye"
-        assert [s["agent"] for s in episode["segments"]] == ["youtube", "alices"]
+        assert [s["agent"] for s in episode["segments"]] == ["youtube", "external"]
 
     def test_raises_when_no_content_pitches(self, monkeypatch):
         weather = _full_pitch(agent="weather", title="w")

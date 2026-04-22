@@ -8,7 +8,7 @@ Flow (per producer/docs/DESIGN.md + docs/specs/2026-04-17-producer-alignment-pla
   Producer decision + marketplace + agentic payment (CLI-level orchestration)
 
   Round 2 — external pitch round (optional)
-      external agents (e.g. AlicesAgent): fetch_context → pitch, reusing Brief
+      external agents (e.g. ExternalAgent): fetch_context → pitch, reusing Brief
 
   agent.pitching.* events carry {"phase": "internal"|"external"}.
 
@@ -426,11 +426,11 @@ def cli_main(argv: list[str] | None = None) -> int:
             )
 
             # ── External pitch round ────────────────────────────────
-            from agents.alices.agent import AlicesAgent
+            from agents.external.agent import ExternalAgent
 
             external_pitches, _ = run_episode(
                 internal_agents=[],
-                external_agents=[AlicesAgent()],
+                external_agents=[ExternalAgent()],
                 user_id=args.user_id,
             )
             pitches_by_agent.update(external_pitches)
