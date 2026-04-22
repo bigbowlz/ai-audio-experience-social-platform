@@ -23,7 +23,7 @@ DEFAULT_SEGMENT_SEC: dict[str, int] = {
     "youtube": 90,
     "weather": 45,
     "calendar": 30,
-    "alices": 90,
+    "external": 90,
 }
 _FALLBACK_SEGMENT_SEC = 60
 

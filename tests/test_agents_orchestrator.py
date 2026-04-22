@@ -134,7 +134,7 @@ class TestExternalPhaseEvents:
         set_default_bus(bus)
         try:
             internals = [_make_stub_agent("weather"), _make_stub_agent("youtube")]
-            externals = [_make_stub_agent("alices")]
+            externals = [_make_stub_agent("external")]
             pitches, brief = run_episode(
                 internals, external_agents=externals, user_id="test"
             )
@@ -148,7 +148,7 @@ class TestExternalPhaseEvents:
         assert ("agent.pitching.done", {"phase": "external"}) in pitching
 
         # External agent's pitches must be merged into the returned dict.
-        assert "alices" in pitches
+        assert "external" in pitches
         assert "weather" in pitches
         assert "youtube" in pitches
 
@@ -159,7 +159,7 @@ class TestExternalPhaseEvents:
         """Empty internal_agents must not emit a spurious internal pitching pair.
 
         CLI invokes run_episode twice: first with internals, then with
-        internal_agents=[] and external_agents=[AlicesAgent()] for the
+        internal_agents=[] and external_agents=[ExternalAgent()] for the
         external-only round. The second call must not fire empty
         agent.pitching.{started,done} with phase=internal.
         """
@@ -168,7 +168,7 @@ class TestExternalPhaseEvents:
         bus.subscribe(lambda name, payload: captured.append((name, payload)))
         set_default_bus(bus)
         try:
-            externals = [_make_stub_agent("alices")]
+            externals = [_make_stub_agent("external")]
             run_episode(internal_agents=[], external_agents=externals, user_id="test")
         finally:
             set_default_bus(EventBus())
@@ -202,7 +202,7 @@ class TestExternalPhaseEvents:
         set_default_bus(bus)
         try:
             internals = [_make_stub_agent("weather")]
-            ext_stub = _make_stub_agent("alices")
+            ext_stub = _make_stub_agent("external")
             run_episode(internals, external_agents=[ext_stub], user_id="test")
         finally:
             set_default_bus(EventBus())

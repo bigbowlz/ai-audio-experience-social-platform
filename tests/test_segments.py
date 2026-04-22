@@ -44,12 +44,12 @@ class TestPhase1GuaranteedSlots:
             "youtube": [_pitch("youtube", 0.9), _pitch("youtube", 0.5)],
             "weather": [_pitch("weather", 0.3)],
             "calendar": [_pitch("calendar", 0.4)],
-            "alices": [_pitch("alices", 0.7)],
+            "external": [_pitch("external", 0.7)],
         }
         order, _, _ = select_guaranteed_slots(pitches)
         guaranteed = order["segments"]
         agents = [p["agent"] for p in guaranteed]
-        assert set(agents) == {"youtube", "weather", "calendar", "alices"}
+        assert set(agents) == {"youtube", "weather", "calendar", "external"}
         assert len(guaranteed) == 4
 
     def test_highest_priority_selected(self):
@@ -116,7 +116,7 @@ class TestSegmentLengths:
             "youtube": [_pitch("youtube", 0.9)],
             "weather": [_pitch("weather", 0.5)],
             "calendar": [_pitch("calendar", 0.4)],
-            "alices": [_pitch("alices", 0.7)],
+            "external": [_pitch("external", 0.7)],
         }
         order, _, _ = select_guaranteed_slots(pitches)
         guaranteed = order["segments"]

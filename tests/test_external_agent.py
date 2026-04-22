@@ -1,7 +1,7 @@
-"""Tests for AlicesAgent — the external creator agent.
+"""Tests for ExternalAgent — the external creator agent.
 
-Uses dev probe JSON as fixture (same data proves shared extractor contract
-works from a second caller). Alice's real Day-0 data replaces it later.
+Uses the pre-captured Day-0 JSON as fixture (same data also proves the
+shared extractor contract works from a second caller).
 
 Spec: agents/youtube/docs/DESIGN.md §Shared extractor
       agents/docs/DESIGN.md §Interface contract
@@ -18,44 +18,44 @@ import pytest
 
 
 class TestAgentMetadata:
-    """AlicesAgent has correct DataAgent protocol fields."""
+    """ExternalAgent has correct DataAgent protocol fields."""
 
     def test_name(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
 
-        agent = AlicesAgent()
-        assert agent.name == "alices"
+        agent = ExternalAgent()
+        assert agent.name == "external"
 
-    def test_display_name(self):
-        from agents.alices.agent import AlicesAgent
+    def test_display_name_is_curator_handle(self):
+        from agents.external.agent import CURATOR_HANDLE, ExternalAgent
 
-        agent = AlicesAgent()
-        assert agent.display_name == "@GoddamnAxl"
+        agent = ExternalAgent()
+        assert agent.display_name == CURATOR_HANDLE
 
     def test_external(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         assert agent.external is True
 
     def test_price_usdc(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         assert agent.price_usdc == 0.10
 
     def test_wallet_address_set(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         assert agent.wallet_address is not None
         assert agent.wallet_address.startswith("0x")
 
     def test_satisfies_data_agent_protocol(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
         from agents.protocol import DataAgent
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         assert isinstance(agent, DataAgent)
 
 
@@ -63,12 +63,12 @@ class TestAgentMetadata:
 
 
 class TestFetchContext:
-    """fetch_context loads Alice's data and returns ScopeContext with InterestProfile."""
+    """fetch_context loads curator data and returns ScopeContext with InterestProfile."""
 
     def test_returns_profile(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         ctx = agent.fetch_context("user1")
         assert "profile" in ctx
         profile = ctx["profile"]
@@ -80,19 +80,19 @@ class TestFetchContext:
         assert "stats" in profile
 
     def test_profile_has_topics(self):
-        """Alice has 709 subs + 260 likes — profile should have topics."""
-        from agents.alices.agent import AlicesAgent
+        """Curator data has plenty of subs + likes — profile should have topics."""
+        from agents.external.agent import ExternalAgent
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         ctx = agent.fetch_context("user1")
         profile = ctx["profile"]
         assert len(profile["combined_topic_scores"]) > 0
         assert len(profile["topic_provenance"]) > 0
 
     def test_profile_scores_l1_normalized(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         ctx = agent.fetch_context("user1")
         profile = ctx["profile"]
         total = sum(profile["combined_topic_scores"].values())
@@ -115,32 +115,32 @@ def _make_brief() -> dict:
 
 
 class TestPitch:
-    """pitch() returns 3–5 Pitch objects with agent='alices'."""
+    """pitch() returns 3–5 Pitch objects with agent='external'."""
 
     def test_returns_3_to_5_pitches(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
         from agents.protocol import bootstrap_memory
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
         assert 3 <= len(pitches) <= 5
 
-    def test_all_pitches_have_agent_alices(self):
-        from agents.alices.agent import AlicesAgent
+    def test_all_pitches_have_agent_external(self):
+        from agents.external.agent import ExternalAgent
         from agents.protocol import bootstrap_memory
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
         for p in pitches:
-            assert p["agent"] == "alices"
+            assert p["agent"] == "external"
 
     def test_pitch_fields_complete(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
         from agents.protocol import bootstrap_memory
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
         for p in pitches:
@@ -153,20 +153,20 @@ class TestPitch:
             assert "provenance_shape" in p
 
     def test_priority_in_range(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
         from agents.protocol import bootstrap_memory
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
         for p in pitches:
             assert 0.0 <= p["priority"] <= 1.0
 
     def test_valid_claim_kind(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
         from agents.protocol import bootstrap_memory
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
         valid = {"durable", "rising", "discovery", "neutral"}
@@ -174,10 +174,10 @@ class TestPitch:
             assert p["claim_kind"] in valid
 
     def test_valid_provenance_shape(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
         from agents.protocol import bootstrap_memory
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
         valid = {"balanced", "sub_only", "like_only"}
@@ -185,21 +185,21 @@ class TestPitch:
             assert p["provenance_shape"] in valid
 
     def test_not_thin_signal(self):
-        """Alice has plenty of data — should never be thin-signal."""
-        from agents.alices.agent import AlicesAgent
+        """Curator has plenty of data — should never be thin-signal."""
+        from agents.external.agent import ExternalAgent
         from agents.protocol import bootstrap_memory
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
         for p in pitches:
             assert p["thin_signal"] is False
 
     def test_source_refs_are_strings(self):
-        from agents.alices.agent import AlicesAgent
+        from agents.external.agent import ExternalAgent
         from agents.protocol import bootstrap_memory
 
-        agent = AlicesAgent()
+        agent = ExternalAgent()
         ctx = agent.fetch_context("user1")
         pitches = agent.pitch(_make_brief(), bootstrap_memory(), ctx, "user1")
         for p in pitches:
@@ -212,7 +212,7 @@ class TestPitch:
 
 
 class TestLlmAgentName:
-    """LLM module accepts agent_name parameter so alices pitches get agent='alices'."""
+    """LLM module accepts agent_name parameter so external pitches get agent='external'."""
 
     def test_generate_pitches_accepts_agent_name(self):
         """generate_pitches should accept agent_name kwarg."""

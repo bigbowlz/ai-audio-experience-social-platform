@@ -65,7 +65,7 @@ def test_pretty_sink_renders_nested_payload_as_tree():
     sink = PrettySink(buf)
     sink("producer.marketplace.queried", {
         "candidates": [
-            {"handle": "alices", "price_usdc": 0.1, "free_tier": True},
+            {"handle": "@GoddamnAxl", "price_usdc": 0.1, "free_tier": True},
             {"handle": "alex", "price_usdc": 0.0, "free_tier": False},
         ],
         "reasoning_summary": "2 candidates available",
@@ -76,7 +76,7 @@ def test_pretty_sink_renders_nested_payload_as_tree():
     assert out.startswith("▸ producer.marketplace.queried\n")
     assert "  candidates:\n" in out
     assert "    [0]:\n" in out
-    assert "      handle: alices" in out
+    assert "      handle: @GoddamnAxl" in out
     assert "      price_usdc: 0.1" in out
     assert "      free_tier: true" in out
     assert "      free_tier: false" in out

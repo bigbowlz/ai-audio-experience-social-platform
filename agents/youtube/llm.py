@@ -27,7 +27,7 @@ from agents.youtube.guardrails import ClaimKind, ProvenanceShape
 # Prompt text lives in agents/youtube/prompts.py. Re-exported here so
 # existing callers that import from this module continue to work.
 from agents.youtube.prompts import (
-    PATRICKS_SYSTEM_PROMPT,
+    EXTERNAL_SYSTEM_PROMPT,
     SYSTEM_PROMPT,
     YOUTUBE_SYSTEM_PROMPT,
     system_prompt_for as _system_prompt_for,

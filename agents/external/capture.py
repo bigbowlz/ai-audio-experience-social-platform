@@ -1,18 +1,18 @@
-"""Capture Alice's YouTube data for the external agent.
+"""Capture the external curator's YouTube data for the external agent.
 
-Alice runs this once (Day 0). It authenticates via the same OAuth desktop
-client as the dev probe, fetches subs + likes + channel/video topic details,
-and writes the four JSON files that the shared extractor consumes.
+The curator runs this once (Day 0). It authenticates via the same OAuth
+desktop client as the dev probe, fetches subs + likes + channel/video topic
+details, and writes the four JSON files that the shared extractor consumes.
 
 Usage:
-    python -m agents.alices.capture
+    python -m agents.external.capture
 
 Requires:
-    - agents/alices/credentials.json (OAuth Desktop client, gitignored)
+    - agents/external/credentials.json (OAuth Desktop client, gitignored)
     - YouTube Data API v3 enabled on the GCP project
-    - Alice added as test user in the OAuth consent screen
+    - The curator added as test user in the OAuth consent screen
 
-Output: agents/alices/data/
+Output: agents/external/data/
     02_subscriptions.json  — subscription items
     03_likes.json          — liked-video playlist items
     07_topic_details.json  — channel topicCategories (all sub + like channels)
@@ -201,7 +201,7 @@ def run() -> None:
 
     # ── Summary ─────────────────────────────────────────────────────
     summary = [
-        "# Alice's YouTube Data — Capture Summary",
+        "# External Curator YouTube Data — Capture Summary",
         "",
         f"Captured: {time.strftime('%Y-%m-%d %H:%M:%S')}",
         "",

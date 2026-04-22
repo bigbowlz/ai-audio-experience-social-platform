@@ -70,7 +70,7 @@ class TestSegmentCachePath:
 
     def test_strips_date_dashes(self, monkeypatch, tmp_path: Path):
         monkeypatch.setenv("RADIO_CACHE_DIR", str(tmp_path))
-        got = _segment_cache_path("alices", "PG Essay", "2026-04-18", 130)
+        got = _segment_cache_path("external", "PG Essay", "2026-04-18", 130)
         # YYYYMMDD, not YYYY-MM-DD
         assert "20260418" in got.name
         assert "2026-04-18" not in got.name

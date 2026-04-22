@@ -30,7 +30,7 @@ MUSIC_CAP = 3
 
 AGENTS: list[tuple[str, Path]] = [
     ("youtube", _REPO_ROOT / "tmp" / "ydata" / "probe_1776208130"),
-    ("alices", _REPO_ROOT / "agents" / "alices" / "data"),
+    ("external", _REPO_ROOT / "agents" / "external" / "data"),
 ]
 
 MUSIC_EXPLICIT = {"jazz", "rhythm-and-blues"}

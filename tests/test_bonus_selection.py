@@ -215,13 +215,13 @@ class TestFallbackPath:
             _pitch("youtube", "Jazz exploration", 0.91, seg_len=90),
             _pitch("weather", "Rainy morning", 0.80, seg_len=45),
             _pitch("calendar", "Standup prep", 0.70, seg_len=30),
-            _pitch("alices", "PG essay", 0.85, seg_len=90),
+            _pitch("external", "PG essay", 0.85, seg_len=90),
         ]
         _, guaranteed_reasons, _ = self._run_with_timeout(guaranteed, [], 0)
 
         assert len(guaranteed_reasons) == 4
         agents = {r["agent"] for r in guaranteed_reasons}
-        assert agents == {"youtube", "weather", "calendar", "alices"}
+        assert agents == {"youtube", "weather", "calendar", "external"}
 
     def test_fallback_bonus_filled_by_priority_sort(self):
         guaranteed = [_pitch("youtube", "Jazz exploration", 0.91, seg_len=90)]
@@ -245,14 +245,14 @@ class TestFallbackPath:
 
     def test_fallback_bonus_reasoning_summary_format(self):
         guaranteed = [_pitch("youtube", "Jazz exploration", 0.91, seg_len=90)]
-        remaining = [_pitch("alices", "PG essay", 0.85, seg_len=30)]
+        remaining = [_pitch("external", "PG essay", 0.85, seg_len=30)]
         budget = 50
 
         bonus, _, _ = self._run_with_timeout(guaranteed, remaining, budget)
 
         assert len(bonus) == 1
         # Fallback format: "{agent}: {title}"
-        assert bonus[0]["reasoning_summary"] == "alices: PG essay"
+        assert bonus[0]["reasoning_summary"] == "external: PG essay"
 
 
 # ── Determinism ───────────────────────────────────────────────────────
@@ -261,9 +261,9 @@ class TestDeterminism:
     def test_deterministic_output_for_same_inputs(self):
         """Two calls with identical inputs produce identical output."""
         guaranteed = [_pitch("youtube", "Jazz exploration", 0.91, seg_len=90)]
-        remaining = [_pitch("alices", "PG essay", 0.85, seg_len=30)]
+        remaining = [_pitch("external", "PG essay", 0.85, seg_len=30)]
         budget = 50
-        response = _bonus_result(guaranteed, ["PG essay"], ["alices"])
+        response = _bonus_result(guaranteed, ["PG essay"], ["external"])
 
         results = []
         for _ in range(2):
