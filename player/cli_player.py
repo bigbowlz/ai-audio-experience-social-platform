@@ -2,6 +2,7 @@
 
 Spec: docs/specs/2026-04-18-v0-cli-pivot-plan.md Task 2.3
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +25,7 @@ class FeedbackSignal:
     agent: str
     pitch_title: str
     signal: str  # "like" | "skip" | "replay"
-    ts: str      # ISO 8601 UTC
+    ts: str  # ISO 8601 UTC
 
 
 async def _run_key_reader() -> AsyncIterator[KeyPress]:
@@ -201,7 +202,7 @@ async def play_episode(
             if restart:
                 continue  # same i; replay the same segment.
             if advance and not quit_requested:
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
             i += 1
 
         if not quit_requested:
@@ -233,12 +234,14 @@ async def _emit(
     seg: dict,
     signal: str,
 ) -> None:
-    await on_feedback(FeedbackSignal(
-        user_id=user_id,
-        episode_id=episode_id,
-        segment_index=seg["segment_index"],
-        agent=seg["agent"],
-        pitch_title=seg["pitch_title"],
-        signal=signal,
-        ts=datetime.now(timezone.utc).isoformat(),
-    ))
+    await on_feedback(
+        FeedbackSignal(
+            user_id=user_id,
+            episode_id=episode_id,
+            segment_index=seg["segment_index"],
+            agent=seg["agent"],
+            pitch_title=seg["pitch_title"],
+            signal=signal,
+            ts=datetime.now(timezone.utc).isoformat(),
+        )
+    )
