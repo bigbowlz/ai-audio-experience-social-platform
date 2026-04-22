@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -472,17 +473,22 @@ def _parse_air_quality(resp: dict) -> dict:
 _FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 _AIR_QUALITY_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 _HTTP_TIMEOUT = 5.0
-_HTTP_RETRIES = 1
+_HTTP_RETRIES = 2
+# Backoff sleep before retry attempt N (1-indexed): (before attempt 2, before attempt 3).
+# Must be length == _HTTP_RETRIES so schedule stays in lockstep with retry count.
+_HTTP_RETRY_BACKOFF_S: tuple[float, ...] = (0.5, 1.5)
 
 
 def _get_json(client: httpx.Client, url: str, params: dict) -> dict | None:
-    """GET a JSON endpoint with one retry on httpx.HTTPError.
+    """GET a JSON endpoint with exponential backoff on httpx.HTTPError.
 
     Returns parsed JSON on success, or None after all attempts fail. Each
     attempt logs its own warning so intermittent failures leave a trace.
     """
     last_exc: Exception | None = None
     for attempt in range(_HTTP_RETRIES + 1):
+        if attempt > 0:
+            time.sleep(_HTTP_RETRY_BACKOFF_S[attempt - 1])
         try:
             resp = client.get(url, params=params)
             resp.raise_for_status()
