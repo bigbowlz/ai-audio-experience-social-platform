@@ -23,7 +23,7 @@ from agents.protocol import (
 # v0: hardcoded list. v1: real marketplace query.
 _MARKETPLACE_V0: list[CreatorAgentListing] = [
     {
-        "handle": "@GoddamnAxl",
+        "handle": "@guest",
         "display_name": "External Lens",
         "scope": "tech / startup culture",
         "price_usdc": 0.10,
@@ -55,7 +55,7 @@ def select_external(
     candidates: list[CreatorAgentListing],
     brief: Brief,
 ) -> CreatorAgentListing:
-    """v0: returns @GoddamnAxl (the only listing that matches seed topics).
+    """v0: returns one guest (the only listing that matches seed topics).
 
     Brief is accepted for v1 forward-compat; v0 ignores it.
     """
@@ -63,6 +63,6 @@ def select_external(
     if not candidates:
         raise ValueError("query_marketplace returned no candidates")
     for c in candidates:
-        if c["handle"] == "@GoddamnAxl":
+        if c["handle"] == "@guest":
             return c
     return candidates[0]
