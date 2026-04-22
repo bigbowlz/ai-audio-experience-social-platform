@@ -16,7 +16,7 @@ Bumped from the pre-2026-04-17 default (claude-sonnet-4-20250514) per decision
 6.1a in the producer alignment cross-check. Override via PRODUCER_LLM_MODEL env var.
 """
 
-DEFAULT_WORDS_PER_MIN = 130
+DEFAULT_WORDS_PER_MIN = 150
 """Spoken-word pacing target. Drives both length estimation (words → seconds)
 and the per-segment target_words hint passed into the Producer LLM prompt.
 
