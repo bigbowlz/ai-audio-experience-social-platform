@@ -52,6 +52,27 @@ rm -rf data/agent_memory/ data/signals/
 
 Agent memory lives at `data/agent_memory/{user_id}/{agent}.json` (v0 scaffold — reads return `{}` until learning-loop unstubs in v1). Producer memory is hydrated each run from `data/signals/{user_id}/*.jsonl`; deleting the signals log resets agent-weight re-ordering to the bootstrap identity.
 
+**Tune topic weights (`config/topic_weights.toml`):**
+
+Edit `config/topic_weights.toml` to boost or damp specific topics — or whole categories — per agent. The file is committed so tuning is visible in git history.
+
+```toml
+[categories]
+music = ["rock-music", "pop-music", "jazz", "classical-music", ...]
+
+[weights.youtube]
+music = 0.5               # ×0.5 applied to every topic in the category
+"action-game" = 0.7       # per-topic override (wins over category)
+
+[weights.alices]
+music = 0.3
+```
+
+- Values are clamped to `[0.1, 10.0]`. `1.0` is identity (no effect); `<1.0` damps; `>1.0` boosts.
+- Precedence: per-topic entry > category entry > `1.0` default for any topic you don't name.
+- Applied as a pure multiplication on each agent's `combined_topic_scores` **before** top-N candidate selection — damped topics become less likely to reach the LLM pitch bundle; boosted topics rise toward the top.
+- Read once per CLI invocation at orchestrator startup (look for `[setup] Topic weights ...` in the run output); edits take effect on the next run.
+
 **Output locations:**
 
 - Per-segment TTS: `./data/episodes/{episode_id}/segment_{n}.mp3`

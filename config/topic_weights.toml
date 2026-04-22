@@ -1,0 +1,32 @@
+# Per-(user, agent) topic_multiplier hydration.
+# Read at orchestrator startup; seeded into AgentMemory.topic_multiplier.
+# Values clamped to [0.1, 10.0]. Missing topics default to 1.0 (neutral).
+# Precedence: per-topic entry > category entry > 1.0 default.
+#
+# 1.0 = no effect. 0.5 = half-weight. 2.0 = double-weight.
+
+[categories]
+music = [
+  "music",
+  "rock-music",
+  "pop-music",
+  "classical-music",
+  "jazz",
+  "electronic-music",
+  "hip-hop-music",
+  "soul-music",
+  "country-music",
+  "christian-music",
+  "independent-music",
+  "reggae",
+  "rhythm-and-blues",
+  "music-of-asia",
+  "music-of-latin-america",
+  "music-video-game",
+]
+
+[weights.youtube]
+music = 1
+
+[weights.external]
+music = 1
