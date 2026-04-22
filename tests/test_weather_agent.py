@@ -1059,3 +1059,89 @@ class TestPitch:
         }
         pitches = agent.pitch(self._make_brief(), bootstrap_memory(), ctx, "user1")
         assert pitches[0]["provenance_shape"] == "balanced"
+
+
+class TestHttpRetry:
+    """_get_json retries httpx.HTTPError with exponential backoff."""
+
+    def _fake_client(self, responses):
+        """Client whose .get() consumes `responses` in order.
+
+        Each entry is either an Exception (raised) or a dict (returned as JSON).
+        """
+        import httpx
+
+        class _Resp:
+            def __init__(self, payload):
+                self._payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._payload
+
+        class _Client:
+            def __init__(self, queue):
+                self.queue = list(queue)
+                self.calls = 0
+
+            def get(self, url, params):
+                self.calls += 1
+                nxt = self.queue.pop(0)
+                if isinstance(nxt, Exception):
+                    raise nxt
+                return _Resp(nxt)
+
+        return _Client(responses)
+
+    def test_success_first_attempt_no_sleep(self, monkeypatch):
+        from agents.weather import agent as wx
+
+        sleeps: list[float] = []
+        monkeypatch.setattr(wx.time, "sleep", lambda s: sleeps.append(s))
+
+        client = self._fake_client([{"ok": True}])
+        result = wx._get_json(client, "http://test", {})
+
+        assert result == {"ok": True}
+        assert client.calls == 1
+        assert sleeps == []
+
+    def test_retries_then_succeeds(self, monkeypatch):
+        import httpx
+
+        from agents.weather import agent as wx
+
+        sleeps: list[float] = []
+        monkeypatch.setattr(wx.time, "sleep", lambda s: sleeps.append(s))
+
+        client = self._fake_client([httpx.ConnectError("boom"), {"ok": True}])
+        result = wx._get_json(client, "http://test", {})
+
+        assert result == {"ok": True}
+        assert client.calls == 2
+        assert sleeps == [0.5]
+
+    def test_gives_up_after_all_attempts(self, monkeypatch):
+        import httpx
+
+        from agents.weather import agent as wx
+
+        sleeps: list[float] = []
+        monkeypatch.setattr(wx.time, "sleep", lambda s: sleeps.append(s))
+
+        errs = [httpx.ConnectError("1"), httpx.ConnectError("2"), httpx.ConnectError("3")]
+        client = self._fake_client(errs)
+        result = wx._get_json(client, "http://test", {})
+
+        assert result is None
+        assert client.calls == 3
+        assert sleeps == [0.5, 1.5]
+
+    def test_backoff_schedule_matches_retries(self):
+        from agents.weather import agent as wx
+
+        assert wx._HTTP_RETRIES == 2
+        assert len(wx._HTTP_RETRY_BACKOFF_S) == wx._HTTP_RETRIES
+        assert wx._HTTP_RETRY_BACKOFF_S == (0.5, 1.5)
