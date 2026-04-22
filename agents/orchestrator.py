@@ -44,6 +44,7 @@ from auth.preflight import ensure_agent_auth
 # `agents.orchestrator.hydrate_producer_memory` directly rather than
 # relying on sys.modules side effects from patching the source module.
 from learning_loop.seed_from_feedback import hydrate_producer_memory
+from learning_loop.hydrate_topic_multipliers import hydrate_topic_multipliers
 
 if TYPE_CHECKING:
     pass
@@ -336,6 +337,15 @@ def cli_main(argv: list[str] | None = None) -> int:
         print(f"[setup]  Learning hydration   {weights_str}")
     else:
         print(f"[setup]  Learning hydration   bootstrap (no prior signals)")
+
+    hydrated_topics = hydrate_topic_multipliers(args.user_id)
+    if hydrated_topics:
+        topics_str = ", ".join(
+            f"{a}({len(w)})" for a, w in sorted(hydrated_topics.items())
+        )
+        print(f"[setup]  Topic weights        {topics_str}")
+    else:
+        print(f"[setup]  Topic weights        none (no config/topic_weights.toml)")
 
     from agents.calendar.agent import CalendarAgent
     from agents.weather.agent import WeatherAgent
