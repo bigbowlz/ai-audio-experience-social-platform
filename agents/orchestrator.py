@@ -18,6 +18,16 @@ Usage (CLI):
 
 from __future__ import annotations
 
+# Load .env before any module that reads env vars at import time.
+# auth.preflight reads YOUTUBE_PROBE_DIR at call time, and
+# agents.youtube.agent / agents.external.agent read their data-dir env
+# vars at module-import time. Previously .env was loaded as a side effect
+# of importing agents.youtube.llm, which happens *after* the first
+# preflight call — so preflight missed .env values and triggered OAuth
+# even when a valid probe dir was configured in .env.
+from dotenv import load_dotenv
+load_dotenv()
+
 import concurrent.futures
 import json
 import os
