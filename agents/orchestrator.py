@@ -576,8 +576,13 @@ def cli_main(argv: list[str] | None = None) -> int:
             segs: list[SegmentScript] = []
             for i, pitch in enumerate(content_pitches):
                 is_first = i == 0
-                seg_payload = build_segment_payload(pitch, brief, is_first)
-                seg = await generate_segment(pitch, brief, is_first=is_first)
+                previous_pitch = content_pitches[i - 1] if i > 0 else None
+                seg_payload = build_segment_payload(
+                    pitch, brief, is_first, previous_segment=previous_pitch
+                )
+                seg = await generate_segment(
+                    pitch, brief, is_first=is_first, previous_segment=previous_pitch
+                )
                 save_segment(episode_id, i, seg_payload, dict(seg))
                 segs.append(seg)
 

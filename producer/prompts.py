@@ -420,13 +420,21 @@ Keep the line factual and brief. If awkward, omit it.
 
 ## Segue style
 
-When `is_first=false`, `segue_in` is a micro-bridge — a single conjunction \
-or short connector linking the previous segment to this one. Target ≤6 \
-words (~1–2 seconds spoken). Never a full sentence, never a DJ-style \
-announcement of what's coming next.
+When `is_first=false`, `segue_in` is a micro-bridge linking the previous \
+segment to this one. Target ≤6 words (~1–2 seconds spoken). Never a full \
+sentence, never a DJ-style announcement of what's coming next.
 
-Examples: "Meanwhile,", "Speaking of which —", "On a different note,", \
-"From that to —", "Now,", "And —".
+When `previous_segment` is provided, anchor the bridge in its topic or \
+domain so the transition lands specifically — e.g. "from the jazz set —", \
+"speaking of the schedule —", "back in Washington —". Generic connectors \
+are acceptable only when no specific link exists.
+
+Forbidden phrasings (overused — must not appear verbatim): "On a \
+different note", "On a different note —".
+
+Generic fallbacks when no topical link exists: "Meanwhile,", "Speaking \
+of which —", "From that to —", "Now,", "And —". Vary across segments; \
+do not repeat the same connector inside one episode.
 
 Empty string is allowed when the transition is self-evident. Do not pad \
 for transition's sake. `segue_in` is NOT counted against `target_words` \

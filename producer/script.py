@@ -146,17 +146,32 @@ def _slug_title(title: str) -> str:
     return slug or "_"
 
 
-def _segment_cache_path(agent: str, title: str, date: str, wpm: int) -> Path:
-    """Cache file path for a (agent, title, date, wpm) key.
+def _segment_cache_path(
+    agent: str,
+    title: str,
+    date: str,
+    wpm: int,
+    previous_key: str | None = None,
+) -> Path:
+    """Cache file path for a (agent, title, date, wpm, [previous]) key.
 
-    Returns `<cache_dir>/segment_scripts/{agent}_{slug}_{YYYYMMDD}_{wpm}.json`.
+    Returns `<cache_dir>/segment_scripts/{agent}_{slug}_{YYYYMMDD}_{wpm}[_after_{prev}].json`.
     Date dashes are stripped so the filename stays short and ls-sortable.
+
+    `previous_key` participates because segue_in is context-sensitive on the
+    prior segment — reusing a cached segue across different orderings would
+    yield transitions that reference the wrong predecessor.
     """
     from producer import cache_dir
 
     date_compact = date.replace("-", "")
     slug = _slug_title(title)
-    return cache_dir() / "segment_scripts" / f"{agent}_{slug}_{date_compact}_{wpm}.json"
+    suffix = f"_after_{previous_key}" if previous_key else ""
+    return (
+        cache_dir()
+        / "segment_scripts"
+        / f"{agent}_{slug}_{date_compact}_{wpm}{suffix}.json"
+    )
 
 
 _SEGMENT_REQUIRED_KEYS = {
@@ -389,14 +404,24 @@ async def _repair_json_retry(raw: str, error: str) -> str | None:
 
 
 async def _hook_fallback_narration(
-    segment: Pitch, brief: Brief, is_first: bool
+    segment: Pitch,
+    brief: Brief,
+    is_first: bool,
+    *,
+    previous_segment: Pitch | None = None,
 ) -> SegmentScript:
     """Plain-text narration fallback when JSON parsing fails twice.
 
     Wraps the model's prose into a SegmentScript in code. `segue_in` is empty
     when `is_first=True` (invariant), else a safe default connector. Estimated
     length is computed from word count at the current WPM.
+
+    `previous_segment` is accepted for signature parity with `generate_segment`
+    but is not threaded into the fallback prompt — the fallback path is a
+    last-resort narration-only recovery, not the place to invest in segue
+    quality.
     """
+    _ = previous_segment  # signature parity only
     wpm = words_per_min()
     target_words = _target_words(segment["suggested_length_sec"], wpm)
     payload = {
@@ -466,10 +491,12 @@ async def generate_segment(
     segment: Pitch,
     brief: Brief,
     is_first: bool,
+    *,
+    previous_segment: Pitch | None = None,
 ) -> SegmentScript:
     """Single async LLM call producing one SegmentScript.
 
-    Taste segments (youtube, alices) use the web_search tool server-side;
+    Taste segments (youtube, external) use the web_search tool server-side;
     weather/calendar segments narrate from `data` only and typically flow
     through the separate opener prompt.
 
@@ -489,7 +516,14 @@ async def generate_segment(
 
     wpm = words_per_min()
     date = brief["today_context"]["date"]
-    cache_path = _segment_cache_path(segment["agent"], segment["title"], date, wpm)
+    previous_key = (
+        f"{previous_segment['agent']}_{_slug_title(previous_segment['title'])}"
+        if previous_segment is not None
+        else None
+    )
+    cache_path = _segment_cache_path(
+        segment["agent"], segment["title"], date, wpm, previous_key=previous_key
+    )
 
     cached = _read_cached_segment(cache_path)
     if cached is not None:
@@ -504,7 +538,9 @@ async def generate_segment(
         _validate_segment(cached, is_first)
         return cached
 
-    payload = build_segment_payload(segment, brief, is_first)
+    payload = build_segment_payload(
+        segment, brief, is_first, previous_segment=previous_segment
+    )
     user_msg = json.dumps(payload, indent=2)
 
     response = await asyncio.to_thread(
@@ -590,7 +626,9 @@ async def generate_segment(
         # no JSON. Builds SegmentScript in code. Keeps the "cannot drop
         # segments" contract intact.
         if seg is None:
-            seg = await _hook_fallback_narration(segment, brief, is_first)
+            seg = await _hook_fallback_narration(
+                segment, brief, is_first, previous_segment=previous_segment
+            )
             fallback_path = "hook_narration"
 
         emit(
@@ -665,7 +703,10 @@ async def stream_episode_script(
     output_keys: set[tuple[str, str]] = set()
 
     for i, pitch in enumerate(selected):
-        seg = await generate_segment(pitch, brief, is_first=(i == 0))
+        previous_segment = selected[i - 1] if i > 0 else None
+        seg = await generate_segment(
+            pitch, brief, is_first=(i == 0), previous_segment=previous_segment
+        )
 
         if i == 0 and seg["segue_in"].strip():
             raise ValueError(
@@ -761,14 +802,23 @@ def _opener_pitch_payload(pitch: Pitch | None) -> dict | None:
     }
 
 
-def build_segment_payload(segment: Pitch, brief: Brief, is_first: bool) -> dict:
+def build_segment_payload(
+    segment: Pitch,
+    brief: Brief,
+    is_first: bool,
+    *,
+    previous_segment: Pitch | None = None,
+) -> dict:
     """Shape the user-message JSON sent to the segment LLM.
 
     Single source of truth for the payload — used by `generate_segment` and
     by artifact capture so the on-disk record matches what the LLM saw.
+
+    `previous_segment` is included when non-None so the LLM can craft a
+    topic-specific segue rather than falling back to generic connectors.
     """
     wpm = words_per_min()
-    return {
+    payload: dict = {
         "segment": {
             "agent": segment["agent"],
             "title": segment["title"],
@@ -783,6 +833,13 @@ def build_segment_payload(segment: Pitch, brief: Brief, is_first: bool) -> dict:
         "target_words": _target_words(segment["suggested_length_sec"], wpm),
         "words_per_minute": wpm,
     }
+    if previous_segment is not None:
+        payload["previous_segment"] = {
+            "agent": previous_segment["agent"],
+            "title": previous_segment["title"],
+            "hook": previous_segment["hook"],
+        }
+    return payload
 
 
 def build_opener_payload(

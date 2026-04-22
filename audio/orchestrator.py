@@ -79,9 +79,14 @@ async def generate_episode_audio(
                 )
         agent = seg["agent"]
         voice_id = VOICE_MAP.get(agent, NARRATOR_VOICE_ID)
+        # Producer pacing counts (segue_in + script) as the spoken unit — TTS
+        # must match or drift telemetry lies and the LLM's transition prose
+        # is wasted. Opener/sign_off pass segue_in="" and short-circuit.
+        segue = seg.get("segue_in", "").strip()
+        text = f"{segue} {seg['script']}" if segue else seg["script"]
         try:
             seg_result = await tts.synthesize(
-                text=seg["script"],
+                text=text,
                 voice_id=voice_id,
                 episode_id=episode_id,
                 segment_index=index,
