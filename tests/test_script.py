@@ -251,7 +251,7 @@ class TestValidation:
         """First segment with non-empty segue_in raises ValueError."""
         pitches = [_full_pitch(agent="weather", title="Weather in SF")]
 
-        async def fake_generate_segment(segment, brief, is_first):
+        async def fake_generate_segment(segment, brief, is_first, *, previous_segment=None):
             return _seg(
                 agent="weather",
                 title="Weather in SF",
@@ -274,7 +274,7 @@ class TestValidation:
 
         calls = [0]
 
-        async def fake_generate_segment(segment, brief, is_first):
+        async def fake_generate_segment(segment, brief, is_first, *, previous_segment=None):
             calls[0] += 1
             if calls[0] == 1:
                 return _seg(agent="weather", title="Weather in SF")
@@ -299,7 +299,7 @@ class TestValidation:
             _full_pitch(agent="youtube", title="Jazz exploration"),
         ]
 
-        async def fake_generate_segment(segment, brief, is_first):
+        async def fake_generate_segment(segment, brief, is_first, *, previous_segment=None):
             # youtube segment returns a wrong title so output_keys won't match input_keys
             if segment["agent"] == "youtube":
                 return _seg(agent="youtube", title="WRONG TITLE")
@@ -342,7 +342,7 @@ class TestHappyPath:
         ]
         idx = [0]
 
-        async def fake_generate_segment(segment, brief, is_first):
+        async def fake_generate_segment(segment, brief, is_first, *, previous_segment=None):
             result = segs[idx[0]]
             idx[0] += 1
             return result
@@ -421,7 +421,7 @@ class TestGenerateEpisodeScriptRouting:
         async def fake_sign_off(brief):
             return "bye"
 
-        async def fake_generate_segment(segment, brief, is_first):
+        async def fake_generate_segment(segment, brief, is_first, *, previous_segment=None):
             return _seg(agent=segment["agent"], title=segment["title"])
 
         monkeypatch.setattr("producer.script.generate_opener", fake_opener)

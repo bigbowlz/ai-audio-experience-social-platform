@@ -129,7 +129,7 @@ async def test_pacing_measured_event_emitted_per_segment(monkeypatch):
     set_default_bus(bus)
 
     try:
-        async def fake_generate_segment(segment, brief, is_first):
+        async def fake_generate_segment(segment, brief, is_first, *, previous_segment=None):
             return {
                 "agent": segment["agent"],
                 "pitch_title": segment["title"],
@@ -181,7 +181,7 @@ async def test_pacing_measured_uses_env_override(monkeypatch):
     bus.subscribe(lambda n, p: captured.append((n, p)))
     set_default_bus(bus)
     try:
-        async def fake_generate_segment(segment, brief, is_first):
+        async def fake_generate_segment(segment, brief, is_first, *, previous_segment=None):
             return {
                 "agent": segment["agent"],
                 "pitch_title": segment["title"],

@@ -41,7 +41,7 @@ async def test_stream_emits_segment_one_first(monkeypatch):
 
     captured: list[str] = []
 
-    async def fake_generate_segment(segment, brief, is_first):
+    async def fake_generate_segment(segment, brief, is_first, *, previous_segment=None):
         captured.append("call")
         return SegmentScript(
             agent=segment["agent"], pitch_title=segment["title"],
@@ -66,7 +66,7 @@ async def test_stream_validates_each_segment(monkeypatch):
     """Decision 2a: per-segment validation (script length floor) still applies."""
     selected = [_pitch("youtube", "yt")]
 
-    async def too_short(segment, brief, is_first):
+    async def too_short(segment, brief, is_first, *, previous_segment=None):
         return SegmentScript(
             agent=segment["agent"], pitch_title=segment["title"],
             segue_in="", script="hi", estimated_length_sec=10,
