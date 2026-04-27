@@ -34,11 +34,12 @@ Open `.env` and fill in:
 
 ### Google OAuth credentials (`app_credential/credentials.json`)
 
-Required for `--calendar` and `--youtube`. This is the OAuth Desktop client secrets file from Google Cloud Console — contact Wanli to get added to the Google Cloud project, then:
+Required for `--calendar` and `--youtube`. Contact Wanli to:
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com) → your project → APIs & Services → Credentials
-2. Download the OAuth 2.0 Desktop client JSON
-3. Save it to `app_credential/credentials.json` (gitignored)
+1. Get your Google account added as a test user on the Google Cloud project
+2. Receive the OAuth Desktop client secrets JSON
+
+Save the file to `app_credential/credentials.json` (gitignored).
 
 ### First run
 
