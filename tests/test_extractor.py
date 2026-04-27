@@ -1,6 +1,6 @@
 """Tests for agents/youtube/extractor.py.
 
-Uses committed probe JSON at tmp/ydata/probe_1776208130/ as fixtures.
+Uses committed probe JSON at ydata/user/ as fixtures.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from agents.youtube.extractor import (
     RECENT_HALF_LIFE_DAYS,
 )
 
-PROBE_DIR = Path(__file__).resolve().parent.parent / "tmp" / "ydata" / "probe_1776208130"
+PROBE_DIR = Path(__file__).resolve().parent.parent / "ydata" / "user"
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 

@@ -1,0 +1,816 @@
+{
+  "requested": 91,
+  "returned_by_api": 86,
+  "missing_from_api": [
+    "s_li5LzWA2I",
+    "aBTDvlteZcs",
+    "7zJ_IDTgMiI",
+    "Zv5o0Q3FUxM",
+    "Vxw1b8f_yts"
+  ],
+  "with_nonempty_topicDetails": 83,
+  "per_video": [
+    {
+      "id": "xzCEcq8fmwA",
+      "title": "Caravan of Dreams",
+      "channel": "Peter White - Topic",
+      "tags": [
+        "Jazz",
+        "Music",
+        "Soul_music"
+      ]
+    },
+    {
+      "id": "4RHgCJVcdQM",
+      "title": "Claude Code + Milla Jovovich = Ultimate Memory System?!",
+      "channel": "Mansel Scheffel",
+      "tags": [
+        "Knowledge",
+        "Technology"
+      ]
+    },
+    {
+      "id": "WlxNNvDHJkE",
+      "title": "MemPalace - How Milla Jovovich's AI Project Scammed the Internet",
+      "channel": "AI Godfather",
+      "tags": [
+        "Society"
+      ]
+    },
+    {
+      "id": "FX1eWKGGOrY",
+      "title": "Ariana Grande Breaks Down Her Iconic Music Videos | Allure",
+      "channel": "Allure",
+      "tags": [
+        "Entertainment",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "WKdqXM1bhDM",
+      "title": "Why Don't Starve Is So Awesome",
+      "channel": "RoboKast",
+      "tags": [
+        "Action-adventure_game",
+        "Action_game",
+        "Role-playing_video_game",
+        "Strategy_video_game",
+        "Video_game_culture"
+      ]
+    },
+    {
+      "id": "E07HsDmpG60",
+      "title": "Essential Beginner Survival Guide (ALL Seasons & Characters) Don't Starve Together",
+      "channel": "Jakeyosaurus",
+      "tags": [
+        "Action-adventure_game",
+        "Action_game",
+        "Role-playing_video_game",
+        "Strategy_video_game",
+        "Video_game_culture"
+      ]
+    },
+    {
+      "id": "sItUCKJQLTU",
+      "title": "A Knight of the Seven Kingdoms | Official Final Trailer | HBO Max",
+      "channel": "HBO Max",
+      "tags": [
+        "Entertainment",
+        "Film",
+        "Television_program"
+      ]
+    },
+    {
+      "id": "5DTWf8ZuOeg",
+      "title": "Modern Family Funniest Moments #2",
+      "channel": "modernfamillyshow",
+      "tags": [
+        "Entertainment",
+        "Film"
+      ]
+    },
+    {
+      "id": "KYbOIu8NYao",
+      "title": "Resident Evil 2: Dead Shot Gameplay - RE2 Remake Arcade Light-Gun Shooter",
+      "channel": "IGN",
+      "tags": [
+        "Action-adventure_game",
+        "Action_game",
+        "Role-playing_video_game",
+        "Video_game_culture"
+      ]
+    },
+    {
+      "id": "lx6SAGZLzqo",
+      "title": "BACK TO 1997 // Vaporwave VHS Nostalgia Mix",
+      "channel": "driftive dreams",
+      "tags": [
+        "Electronic_music",
+        "Music"
+      ]
+    },
+    {
+      "id": "Wekqb_ggLLQ",
+      "title": "【Mashup】The Weeknd × Tomoko Aran(亜蘭知子)(Out of Time/Midnight Pretenders)",
+      "channel": "DJ ArA【Mashup & Mix】",
+      "tags": [
+        "Electronic_music",
+        "Music",
+        "Music_of_Asia",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "QicgfPt_k6M",
+      "title": "亜蘭知子　浮遊空間　Midnight Pretenders",
+      "channel": "shary0517",
+      "tags": [
+        "Music",
+        "Music_of_Asia"
+      ]
+    },
+    {
+      "id": "46bf50R6z_c",
+      "title": "Follow for more funny ads 😂",
+      "channel": "Professor Danny",
+      "tags": [
+        "Entertainment",
+        "Television_program"
+      ]
+    },
+    {
+      "id": "ef_Yk7e9Fv8",
+      "title": "Changing songs from MAJOR to MINOR",
+      "channel": "David Bennett Music Theory",
+      "tags": [
+        "Music",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "jEyR-kgW65g",
+      "title": "What if Ariana Grande was born in another country?😱🌎 #arianagrande",
+      "channel": "IconEvolutions",
+      "tags": [
+        "Lifestyle_(sociology)"
+      ]
+    },
+    {
+      "id": "STugQ0X1NoI",
+      "title": "10cc - I'm Not In Love",
+      "channel": "10ccVEVO",
+      "tags": [
+        "Music",
+        "Pop_music",
+        "Rock_music",
+        "Soul_music"
+      ]
+    },
+    {
+      "id": "rK5TyISxZ_M",
+      "title": "RAYE - WHERE IS MY HUSBAND! (Official Music Video)",
+      "channel": "RAYE",
+      "tags": [
+        "Hip_hop_music",
+        "Independent_music",
+        "Music",
+        "Pop_music",
+        "Rhythm_and_blues",
+        "Soul_music"
+      ]
+    },
+    {
+      "id": "rITxS135P5g",
+      "title": "The best arrangement #movie #film",
+      "channel": "Cinephile Clips",
+      "tags": [
+        "Entertainment",
+        "Film"
+      ]
+    },
+    {
+      "id": "RdBRKu7vfAc",
+      "title": "Heidi Moneymaker: Black Widow's Stunt Double & Style Creator #shorts",
+      "channel": "Mythical",
+      "tags": [
+        "Entertainment",
+        "Film"
+      ]
+    },
+    {
+      "id": "i5MXo97Oclo",
+      "title": "one of the best michael Scott moments|The office🎬#MichaelScott#theoffice#pambeesly#series#artshow",
+      "channel": "A film buff",
+      "tags": [
+        "Entertainment",
+        "Film",
+        "Television_program"
+      ]
+    },
+    {
+      "id": "z2WUvmtttNU",
+      "title": "陳慧琳 - 《有時寂寞》MV",
+      "channel": "KellyChenVEVO",
+      "tags": [
+        "Music",
+        "Music_of_Asia",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "Zpjuq2FGrJw",
+      "title": "Grandad's emotional reaction as his grandson brings his childhood to life with Ai video for his 90th",
+      "channel": "Your Positive News",
+      "tags": [
+        "Entertainment"
+      ]
+    },
+    {
+      "id": "IISaqrS_XpQ",
+      "title": "Soundtrack - Pride and Prejudice - Liz On Top Of The World",
+      "channel": "Melt_Them",
+      "tags": [
+        "Classical_music",
+        "Film",
+        "Music"
+      ]
+    },
+    {
+      "id": "-vYY0aRH46I",
+      "title": "Soundtrack - Pride and Prejudice - Dawn",
+      "channel": "Melt_Them",
+      "tags": [
+        "Classical_music",
+        "Music"
+      ]
+    },
+    {
+      "id": "5xje9vNKdi8",
+      "title": "Sight",
+      "channel": "Takeshi Kobayashi - Topic",
+      "tags": [
+        "Classical_music",
+        "Music",
+        "Music_of_Asia"
+      ]
+    },
+    {
+      "id": "eB49XK7EhfQ",
+      "title": "フォークダンス",
+      "channel": "宮原芽映 - Topic",
+      "tags": [
+        "Music",
+        "Music_of_Asia"
+      ]
+    },
+    {
+      "id": "t-JD2bnNQvY",
+      "title": "Nocturne in B flat minor, Op. 9 no. 1",
+      "channel": "Frédéric Chopin - Topic",
+      "tags": [
+        "Classical_music",
+        "Music"
+      ]
+    },
+    {
+      "id": "xsKH0YkYcos",
+      "title": "flower dance With SIRE S7",
+      "channel": "sire korea",
+      "tags": [
+        "Hip_hop_music",
+        "Music",
+        "Music_of_Asia"
+      ]
+    },
+    {
+      "id": "j-KVZJ2Ir98",
+      "title": "You're Magic",
+      "channel": "Brian Culbertson - Topic",
+      "tags": [
+        "Electronic_music",
+        "Jazz",
+        "Music",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "CJ1rauF6ras",
+      "title": "Sha'carri Richardson Winning 🥇",
+      "channel": "TRACK SPORTS ENT",
+      "tags": [
+        "Sport"
+      ]
+    },
+    {
+      "id": "2DtfPfV-DfM",
+      "title": "Sha'Carri Richardson is the 100m world champion 🔥 #athletics #sprint #usa #worldathleticschamps",
+      "channel": "World Athletics",
+      "tags": [
+        "Sport"
+      ]
+    },
+    {
+      "id": "hQUjpbb75eY",
+      "title": "REST APIs Explained in 30 secs #javascript #python #web #coding #programming",
+      "channel": "ByteByteGo",
+      "tags": [
+        "Knowledge",
+        "Technology"
+      ]
+    },
+    {
+      "id": "Uoox9fpmDP0",
+      "title": "Bôa -  Duvet (Official Video)",
+      "channel": "Bôa",
+      "tags": [
+        "Independent_music",
+        "Music",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "lW9ep22YmlM",
+      "title": "Egzod & Maestro Chives - Royalty (ft. Neoni) [Official Lyric Video]",
+      "channel": "Egzod",
+      "tags": [
+        "Electronic_music",
+        "Music",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "eSLNk4Y8Quo",
+      "title": "Chinese cat mistakenly shipped to America",
+      "channel": "GeoBeats Animals",
+      "tags": [
+        "Lifestyle_(sociology)",
+        "Pet"
+      ]
+    },
+    {
+      "id": "2zJjNaOuPiU",
+      "title": "【ギター弾き語り／歌ってみた】「Flavor Of Life」  covered by 跳亜",
+      "channel": "tobia",
+      "tags": [
+        "Music",
+        "Music_of_Asia"
+      ]
+    },
+    {
+      "id": "U4I7orCCFOo",
+      "title": "Utada Hikaru - Flavor of Life",
+      "channel": "Sugar Joiko",
+      "tags": [
+        "Music",
+        "Music_of_Asia",
+        "Pop_music",
+        "Rhythm_and_blues",
+        "Soul_music"
+      ]
+    },
+    {
+      "id": "4WqOqBQRlC0",
+      "title": "His Last Brain Cell Just Gave Up 😂",
+      "channel": "Dramecs",
+      "tags": [
+        "Entertainment",
+        "Pet"
+      ]
+    },
+    {
+      "id": "a5xOkJ24r_o",
+      "title": "她差点被绑架结果出道 😱#AnyaTaylorJoy #english #learnenglish #interview #englishtips",
+      "channel": "Flick Fluent",
+      "tags": [
+        "Entertainment"
+      ]
+    },
+    {
+      "id": "CIt2p8g4zPU",
+      "title": "Josh Groban - Pure Imagination (Official Live Video From Stages Live)",
+      "channel": "Josh Groban",
+      "tags": [
+        "Christian_music",
+        "Classical_music",
+        "Music",
+        "Pop_music",
+        "Soul_music"
+      ]
+    },
+    {
+      "id": "SVi3-PrQ0pY",
+      "title": "Gene Wilder - Pure Imagination",
+      "channel": "beralts",
+      "tags": [
+        "Film",
+        "Music",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "m3lF2qEA2cw",
+      "title": "Creep - Vintage Postmodern Jukebox Radiohead Cover ft. Haley Reinhart",
+      "channel": "PostmodernJukebox",
+      "tags": [
+        "Jazz",
+        "Music",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "aLnZ1NQm2uk",
+      "title": "All About That Bass - Postmodern Jukebox European Tour Version",
+      "channel": "PostmodernJukebox",
+      "tags": [
+        "Jazz",
+        "Music",
+        "Pop_music",
+        "Rhythm_and_blues",
+        "Soul_music"
+      ]
+    },
+    {
+      "id": "jRHyKhpYmwY",
+      "title": "Iron Farm House 4.0 Tutorial [Aesthetic Farm] [Java/Bedrock Edition] [1.21+]",
+      "channel": "aJackMinecraft",
+      "tags": [
+        "Role-playing_video_game",
+        "Simulation_video_game",
+        "Video_game_culture"
+      ]
+    },
+    {
+      "id": "H5DX9G9At4Y",
+      "title": "madam, may I?",
+      "channel": "is it sunday?",
+      "tags": [
+        "Jazz",
+        "Music"
+      ]
+    },
+    {
+      "id": "QULvNeUInKA",
+      "title": "Is This Mine ?",
+      "channel": "mmlm",
+      "tags": [
+        "Electronic_music",
+        "Music"
+      ]
+    },
+    {
+      "id": "oovbDy30-3s",
+      "title": "matcha.",
+      "channel": "ggg.",
+      "tags": [
+        "Music"
+      ]
+    },
+    {
+      "id": "msviAyPk9Mk",
+      "title": "Bass riff that everyone likes",
+      "channel": "Ichika Nito",
+      "tags": [
+        "Jazz",
+        "Music"
+      ]
+    },
+    {
+      "id": "xbibCPr7R6Y",
+      "title": "Am I Still Dreaming?",
+      "channel": "Loom room",
+      "tags": [
+        "Electronic_music",
+        "Hip_hop_music",
+        "Jazz",
+        "Music"
+      ]
+    },
+    {
+      "id": "MhKaVPP0Y7g",
+      "title": "Invention no 13 in A minor by J.S. Bach",
+      "channel": "Justin Ball Recording",
+      "tags": [
+        "Classical_music",
+        "Music"
+      ]
+    },
+    {
+      "id": "B6WnwbLY48Y",
+      "title": "𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭 90s Japanese Lofi Hiphop 📼 Nostalgic Chill Vibes",
+      "channel": "LoFi Tokyo",
+      "tags": [
+        "Hip_hop_music",
+        "Music"
+      ]
+    },
+    {
+      "id": "qJtLZvhq-UQ",
+      "title": "Smoke and Goodbye",
+      "channel": "Dark Desire Lofi",
+      "tags": [
+        "Electronic_music",
+        "Jazz",
+        "Music"
+      ]
+    },
+    {
+      "id": "89_KXT5ztTU",
+      "title": "Jimmy Sax - No Man No Cry  (live)",
+      "channel": "Jimmy Sax",
+      "tags": [
+        "Electronic_music",
+        "Jazz",
+        "Music"
+      ]
+    },
+    {
+      "id": "9FHjfzS4BqQ",
+      "title": "make your own things",
+      "channel": "Scott Yu-Jan",
+      "tags": [
+        "Hobby",
+        "Lifestyle_(sociology)",
+        "Technology"
+      ]
+    },
+    {
+      "id": "_yMNC0KlxPw",
+      "title": "BBC紀錄片：下藥、性侵和羞辱——揭露韓流明星聊天室裡的秘密－ BBC News 中文",
+      "channel": "BBC News 中文",
+      "tags": [
+        "Politics",
+        "Society"
+      ]
+    },
+    {
+      "id": "A67Xkqh8uEo",
+      "title": "How I've Been Using the reMarkable 2 (2023) for 3 Months",
+      "channel": "Shu Omi",
+      "tags": [
+        "Technology"
+      ]
+    },
+    {
+      "id": "YRemMgGfbKg",
+      "title": "Free 30 Week Software Engineering Bootcamp - Class 01 - Learn The Basics Of HTML! #100Devs",
+      "channel": "Leon Noel",
+      "tags": [
+        "Knowledge",
+        "Technology"
+      ]
+    },
+    {
+      "id": "buKn1QLK9fU",
+      "title": "我离婚了，终于有勇气来和大家说了",
+      "channel": "大佬甜er",
+      "tags": [
+        "Lifestyle_(sociology)"
+      ]
+    },
+    {
+      "id": "lHhFrD1UWI0",
+      "title": "i got married",
+      "channel": "Davie504",
+      "tags": [
+        "Lifestyle_(sociology)"
+      ]
+    },
+    {
+      "id": "ORdWE_ffirg",
+      "title": "Crypto: The World’s Greatest Scam.",
+      "channel": "James Jani",
+      "tags": []
+    },
+    {
+      "id": "___4bGtDc2g",
+      "title": "[Tutorial/Mirrored] Chances -Thuy || MONROE choreography || jinist ||dancecover",
+      "channel": "지니스트jinist, Dance Studio♥️",
+      "tags": [
+        "Electronic_music",
+        "Music",
+        "Music_of_Asia",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "dm5_81k5WWw",
+      "title": "Julia Michaels - In This Place (From \"Ralph Breaks the Internet\")",
+      "channel": "DisneyMusicVEVO",
+      "tags": [
+        "Music",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "4mKIca7ESHM",
+      "title": "Ariana Grande, Julia Michaels - breathin in this place (Mashup) [MV]",
+      "channel": "GC MASHIE",
+      "tags": [
+        "Electronic_music",
+        "Music",
+        "Pop_music",
+        "Rhythm_and_blues"
+      ]
+    },
+    {
+      "id": "tv55yOPiqPI",
+      "title": "iPhone XS Max Charging Port Replacement",
+      "channel": "Wit Rigs",
+      "tags": [
+        "Technology"
+      ]
+    },
+    {
+      "id": "fbqHK8i-HdA",
+      "title": "The Most Insane Ski Run Ever Imagined - Markus Eder's The Ultimate Run",
+      "channel": "Red Bull Snow",
+      "tags": [
+        "Hobby",
+        "Lifestyle_(sociology)",
+        "Television_program"
+      ]
+    },
+    {
+      "id": "N-_M7f9r4Ts",
+      "title": "🎵［Playlist］疲れた時に聴きたい音楽",
+      "channel": "透明愛好家tomei",
+      "tags": [
+        "Lifestyle_(sociology)"
+      ]
+    },
+    {
+      "id": "sZxiRRUiSlo",
+      "title": "2 个小时超好听的吉他音乐 安静 纯音乐 轻音乐 背景音乐 放松音乐 ( Acoustic guitar, relaxing guitar music)",
+      "channel": "吉他放鬆音樂",
+      "tags": [
+        "Music"
+      ]
+    },
+    {
+      "id": "TF21AsQZWDU",
+      "title": "【CITYPOP】Japanese Female Citypop 1992-95🚬 ~ Late Night シティポップ",
+      "channel": "Aesthetix Moon",
+      "tags": [
+        "Music",
+        "Music_of_Asia",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "9eCY1JFQWts",
+      "title": "【英國私立學校特有的秘密】public school 在英國是私立學校？",
+      "channel": "Susie Woo 戴舒萱",
+      "tags": []
+    },
+    {
+      "id": "8NKf38jJkiY",
+      "title": "【越哥】激励几代人的励志电影，趁年轻早点看，可能会改变你的一生！",
+      "channel": "越哥说电影",
+      "tags": [
+        "Film"
+      ]
+    },
+    {
+      "id": "lWrsvth19Nc",
+      "title": "Funny Talent Skit",
+      "channel": "TheJBugMelody",
+      "tags": [
+        "Entertainment",
+        "Film",
+        "Humour",
+        "Performing_arts"
+      ]
+    },
+    {
+      "id": "nsw0Px-Pho8",
+      "title": "How to Cook Steak Perfectly Every Time | The Stay At Home Chef",
+      "channel": "The Stay At Home Chef",
+      "tags": [
+        "Food",
+        "Lifestyle_(sociology)"
+      ]
+    },
+    {
+      "id": "sAYoX5VWYiI",
+      "title": "1秒换脸！绝美撩人红茶妆了解一下？",
+      "channel": "大佬甜er",
+      "tags": [
+        "Lifestyle_(sociology)"
+      ]
+    },
+    {
+      "id": "sG4i1QuJ3FI",
+      "title": "如何把寡淡无神的眼睛画得清透无辜又勾人？鞠婧祎同款心机眼妆教程",
+      "channel": "大佬甜er",
+      "tags": [
+        "Lifestyle_(sociology)"
+      ]
+    },
+    {
+      "id": "SLQHGFHOXEc",
+      "title": "(点CC看字幕)第131期：财务自由之后就没烦恼了？一个真实的故事：财务自由之后的人生路",
+      "channel": "跟我一起来谈钱",
+      "tags": []
+    },
+    {
+      "id": "p3zbb6I8Vr8",
+      "title": "Doja Cat - Say So ABS WORKOUT ROUTINE",
+      "channel": "MadFit",
+      "tags": [
+        "Hobby",
+        "Lifestyle_(sociology)",
+        "Physical_fitness"
+      ]
+    },
+    {
+      "id": "Vw4mtzJS87c",
+      "title": "大佬甜er |新手化妆常犯哪些可怕错误？保姆级细致解说 |正确示范VS错误示范",
+      "channel": "大佬甜er",
+      "tags": [
+        "Lifestyle_(sociology)"
+      ]
+    },
+    {
+      "id": "HNd1_irOL5k",
+      "title": "Scrum vs Kanban: Two Agile Teams Go Head-to-Head",
+      "channel": "Development That Pays",
+      "tags": [
+        "Business",
+        "Knowledge"
+      ]
+    },
+    {
+      "id": "xoxhDk-hwuo",
+      "title": "Glitter Bomb 1.0 vs Porch Pirates",
+      "channel": "Mark Rober",
+      "tags": [
+        "Hobby",
+        "Lifestyle_(sociology)"
+      ]
+    },
+    {
+      "id": "UOxkGD8qRB4",
+      "title": "K/DA - POP/STARS (ft. Madison Beer, (G)I-DLE, Jaira Burns) | Music Video - League of Legends",
+      "channel": "League of Legends",
+      "tags": [
+        "Video_game_culture"
+      ]
+    },
+    {
+      "id": "q7j2d6YCQbg",
+      "title": "Overwatch Animated Short | “Shooting Star”",
+      "channel": "PlayOverwatch",
+      "tags": [
+        "Role-playing_video_game",
+        "Video_game_culture"
+      ]
+    },
+    {
+      "id": "WwyqQ-o6zHA",
+      "title": "Pop Culture Typography",
+      "channel": "Isaac Moores",
+      "tags": [
+        "Music",
+        "Pop_music"
+      ]
+    },
+    {
+      "id": "9NUjHBNWe9M",
+      "title": "Introduction to Pivot Tables, Charts, and Dashboards in Excel (Part 1)",
+      "channel": "Excel Campus - Jon",
+      "tags": [
+        "Knowledge"
+      ]
+    },
+    {
+      "id": "SPZ3DXYSS1Q",
+      "title": "最受不了别人这样的P图方式！中西修图天壤之别！Photoshop in Asia vs the West",
+      "channel": "MYBY孟言布语",
+      "tags": [
+        "Lifestyle_(sociology)"
+      ]
+    },
+    {
+      "id": "zIiLz_z1_Lo",
+      "title": "Hanzo, At Your Service",
+      "channel": "ThatPunchKid",
+      "tags": [
+        "Action-adventure_game",
+        "Action_game",
+        "Role-playing_video_game",
+        "Video_game_culture"
+      ]
+    },
+    {
+      "id": "d5cJlGgW3Jg",
+      "title": "Minecraft Timelapse - Draining an Ocean (MULTIPLAYER BASE UPDATE)",
+      "channel": "Archelaus",
+      "tags": [
+        "Action-adventure_game",
+        "Role-playing_video_game",
+        "Simulation_video_game",
+        "Video_game_culture"
+      ]
+    }
+  ]
+}

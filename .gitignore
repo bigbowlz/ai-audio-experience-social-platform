@@ -23,3 +23,7 @@ exports/
 docs/comparison.md
 docs/superpowers/
 docs/script-zk.md
+
+ydata/**
+!ydata/guest/
+!ydata/guest/**

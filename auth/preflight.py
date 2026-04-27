@@ -23,7 +23,7 @@ _CALENDAR_TOKEN_PATH = _CONFIG_DIR / "calendar_token.json"
 # (which uses `Path(__file__).parents[2]` — agents/youtube/agent.py is two
 # levels down; here we're at auth/preflight.py so one .parent suffices).
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_DEFAULT_YOUTUBE_PROBE_DIR = _REPO_ROOT / "tmp" / "ydata" / "probe_1776208130"
+_DEFAULT_YOUTUBE_PROBE_DIR = _REPO_ROOT / "ydata" / "user"
 # Probe is considered "captured" when this file exists in the probe dir.
 # YouTubeAgent reads this file at agents/youtube/agent.py:68.
 _YOUTUBE_PROBE_SENTINEL = "02_subscriptions.json"
@@ -70,7 +70,7 @@ def ensure_youtube_auth() -> None:
 
     Triggers `agents.youtube.capture.oauth_and_capture` against the same
     dir that YouTubeAgent will read from (YOUTUBE_PROBE_DIR, or the
-    default at tmp/ydata/probe_1776208130). The sentinel file
+    default at ydata/user). The sentinel file
     (02_subscriptions.json) is what `_load_probe_data` opens first at
     agents/youtube/agent.py:68 — its absence is our "not yet captured"
     signal.

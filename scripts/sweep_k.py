@@ -29,7 +29,7 @@ TOP_N = 8
 MUSIC_CAP = 3
 
 AGENTS: list[tuple[str, Path]] = [
-    ("youtube", _REPO_ROOT / "tmp" / "ydata" / "probe_1776208130"),
+    ("youtube", _REPO_ROOT / "ydata" / "user"),
     ("external", _REPO_ROOT / "agents" / "external" / "data"),
 ]
 
