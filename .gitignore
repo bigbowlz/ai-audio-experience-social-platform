@@ -18,6 +18,7 @@ exports/
 /exports/
 
 .pytest_cache
+*.egg-info/
 
 .claude
 docs/comparison.md
