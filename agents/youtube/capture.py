@@ -9,7 +9,7 @@ Public API:
     main()                             # standalone OAuth + capture
 
 Standalone:
-    python -m agents.youtube.capture [--out agents/youtube/data]
+    python -m agents.youtube.capture [--out ydata/user]
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ from pathlib import Path
 from google.auth.transport.requests import AuthorizedSession
 
 _REPO_ROOT = Path(__file__).parents[2]
-_DEFAULT_OUT = _REPO_ROOT / "agents" / "youtube" / "data"
-_CREDENTIALS = _REPO_ROOT / "tmp" / "DPAPI" / "credentials.json"
+_DEFAULT_OUT = _REPO_ROOT / "ydata" / "user"
+_CREDENTIALS = _REPO_ROOT / "app_credential" / "credentials.json"
 _SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
 _API = "https://www.googleapis.com/youtube/v3"
 
