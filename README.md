@@ -16,7 +16,7 @@ Absent flag → that agent is skipped. You must pass at least one.
 
 - `--weather`: browser geolocation flow (artifact will be stored: `~/.config/radio-podcast/weather_location.json`)
 - `--calendar`: Google OAuth flow (artifact will be stored: `~/.config/radio-podcast/calendar_token.json`); please contact Wanli to get your google account added to the app to use OAuthl
-- `--youtube`: YouTube Data API OAuth + capture (requires `tmp/DPAPI/credentials.json`; artifact will be stored: `tmp/ydata/probe_1776208130/02_subscriptions.json` or `$YOUTUBE_PROBE_DIR`); please contact Wanli to get your google account added to the app to use OAuth
+- `--youtube`: YouTube Data API OAuth + capture (requires `app_credential/credentials.json`; artifact will be stored: `ydata/user/02_subscriptions.json` or `$YOUTUBE_PROBE_DIR`); please contact Wanli to get your google account added to the app to use OAuth
 
 **Playback hotkeys (during `afplay` playback):**
 
@@ -96,4 +96,4 @@ music = 0.3
 - `ffmpeg` on PATH (for MP3 concat export)
 - ElevenLabs API key (`ELEVENLABS_API_KEY`)
 - Anthropic API key (`ANTHROPIC_API_KEY`)
-- YouTube Data API credentials (`tmp/DPAPI/credentials.json`) for `--youtube` - please contact Wanli for access
+- YouTube Data API credentials (`app_credential/credentials.json`) for `--youtube` - please contact Wanli for access
