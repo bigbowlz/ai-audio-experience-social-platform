@@ -44,7 +44,7 @@ log = logging.getLogger(__name__)
 # Override via YOUTUBE_PROBE_DIR env var; defaults to the committed dev probe.
 
 _REPO_ROOT = Path(__file__).parents[2]
-_DEFAULT_PROBE_DIR = _REPO_ROOT / "tmp" / "ydata" / "probe_1776208130"
+_DEFAULT_PROBE_DIR = _REPO_ROOT / "ydata" / "user"
 PROBE_DIR = Path(os.environ.get("YOUTUBE_PROBE_DIR", _DEFAULT_PROBE_DIR))
 
 # ── Algo constants ────────────────────────────────────────────────────
