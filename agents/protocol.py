@@ -78,6 +78,7 @@ class Pitch(TypedDict, total=False):
     thin_signal: bool  # True iff exactly 1 pitch due to insufficient data
     claim_kind: str  # "durable" | "rising" | "discovery" | "neutral"
     provenance_shape: str  # "balanced" | "sub_only" | "like_only"
+    anchor: str  # primary like-video id if any; used by producer for dedup. Absent if no like-anchor.
 
 
 # ── RunningOrder: Producer's selected segments + episode-level metadata ──

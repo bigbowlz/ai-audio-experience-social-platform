@@ -170,11 +170,17 @@ def _fallback_bonus_selection(
     segue_overhead_sec: int,
 ) -> list[Pitch]:
     selected: list[Pitch] = []
+    seen_anchors: set[str] = set()
     # Decision 5a: deterministic across-agent tiebreaking.
     for pitch in sorted(
         remaining_pitches,
         key=lambda p: (-p["priority"], p["agent"], p["title"]),
     ):
+        # Anchor dedup: skip a bonus pitch whose anchor matches one
+        # already chosen earlier in the bonus pass.
+        anchor = pitch.get("anchor")
+        if anchor and anchor in seen_anchors:
+            continue
         seg_len = _segment_length(pitch, length_overrides)
         cost = seg_len + segue_overhead_sec
         if budget >= cost:
@@ -185,6 +191,8 @@ def _fallback_bonus_selection(
                     "reasoning_summary": f"{pitch['agent']}: {pitch['title']}",
                 }
             )
+            if anchor:
+                seen_anchors.add(anchor)
             budget -= cost
     return selected
 
@@ -281,11 +289,19 @@ def select_bonus_segments_llm(
     # Code-side budget enforcement — validate titles and enforce budget
     budget = budget_remaining_sec
     bonus_selected: list[Pitch] = []
+    seen_anchors: set[str] = set()
     for pick in llm_result["bonus_picks"]:
         pitch = _find_in_remaining(pick["pitch_title"], remaining_pitches)
         if pitch is None:
             log.warning(
                 "select_bonus_llm: unknown title %r — skipping", pick["pitch_title"]
+            )
+            continue
+        anchor = pitch.get("anchor")
+        if anchor and anchor in seen_anchors:
+            log.info(
+                "select_bonus_llm: dropping %r — anchor %s already used by another bonus pick",
+                pick["pitch_title"], anchor,
             )
             continue
         seg_len = _segment_length(pitch, length_overrides)
@@ -298,6 +314,8 @@ def select_bonus_segments_llm(
                     "reasoning_summary": pick["reasoning_summary"],
                 }
             )
+            if anchor:
+                seen_anchors.add(anchor)
             budget -= cost
 
     return (

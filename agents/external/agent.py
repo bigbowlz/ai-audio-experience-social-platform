@@ -41,8 +41,12 @@ from learning_loop import load_agent_memory
 from agents.youtube.extractor import (
     Contributor,
     InterestProfile,
+    TopicMeta,
+    dedupe_bundle_by_anchor,
     extract_profile,
+    primary_anchor,
 )
+from agents.youtube.canonicalize import canonicalize
 from agents.youtube.guardrails import (
     ClaimKind,
     ProvenanceShape,
@@ -73,11 +77,17 @@ MIN_PITCHES = 3
 
 def _load_data(
     data_dir: Path,
-) -> tuple[list[dict], list[dict], dict[str, list[str]], dict[str, list[str]]]:
-    """Load captured JSON and return (subs, likes, channel_topics, video_topics).
+) -> tuple[
+    list[dict],
+    list[dict],
+    dict[str, list[str]],
+    dict[str, list[str]],
+    dict[str, TopicMeta],
+]:
+    """Load captured JSON and canonicalize topic URLs/titles to QIDs.
 
-    Same format as YouTubeAgent's _load_probe_data — both consume the
-    shared extractor's input contract.
+    Same shape as YouTubeAgent's _load_probe_data — both consume the
+    shared extractor's input contract on QIDs.
     """
     with open(data_dir / "02_subscriptions.json") as f:
         subs = json.load(f)["items"]
@@ -87,21 +97,45 @@ def _load_data(
 
     with open(data_dir / "07_topic_details.json") as f:
         chan_raw = json.load(f)
-    channel_topics: dict[str, list[str]] = {}
+    channel_urls: dict[str, list[str]] = {}
     for item in chan_raw.get("items", []):
         cats = item.get("topicDetails", {}).get("topicCategories", [])
         if cats:
-            channel_topics[item["id"]] = cats
+            channel_urls[item["id"]] = cats
 
     with open(data_dir / "08_video_topic_details.json") as f:
         vid_raw = json.load(f)
-    video_topics: dict[str, list[str]] = {}
+    video_urls: dict[str, list[str]] = {}
     for entry in vid_raw.get("per_video", []):
         tags = entry.get("tags", [])
         if tags:
-            video_topics[entry["id"]] = tags
+            video_urls[entry["id"]] = tags
 
-    return subs, likes, channel_topics, video_topics
+    all_inputs: set[str] = set()
+    for urls in channel_urls.values():
+        all_inputs.update(urls)
+    for urls in video_urls.values():
+        all_inputs.update(urls)
+    resolved = canonicalize(sorted(all_inputs))
+
+    channel_qids = {
+        cid: [resolved[u]["qid"] for u in urls if resolved.get(u) is not None]
+        for cid, urls in channel_urls.items()
+    }
+    video_qids = {
+        vid: [resolved[u]["qid"] for u in urls if resolved.get(u) is not None]
+        for vid, urls in video_urls.items()
+    }
+    topic_meta: dict[str, TopicMeta] = {}
+    for ct in resolved.values():
+        if ct is None:
+            continue
+        topic_meta[ct["qid"]] = {
+            "label": ct["label"],
+            "canonical_url": ct["canonical_url"],
+        }
+
+    return subs, likes, channel_qids, video_qids, topic_meta
 
 
 # ── Deterministic candidate selection ────────────────────────────────
@@ -117,12 +151,8 @@ def _top_n_seeded(score: dict[str, float], n: int, seed: tuple) -> list[str]:
 # ── Template hook generation (fallback) ──────────────────────────────
 
 
-def _topic_label(topic: str) -> str:
-    return topic.replace("-", " ")
-
-
 def _template_hook(
-    topic: str,
+    label: str,
     claim_kind: ClaimKind,
     contributors: list[Contributor],
 ) -> str:
@@ -133,7 +163,6 @@ def _template_hook(
     as a curator recommendation, never as "here's something you searched
     for".
     """
-    label = _topic_label(topic)
     subs = [c for c in contributors if c["kind"] == "sub"]
     likes = [c for c in contributors if c["kind"] == "like"]
 
@@ -211,8 +240,10 @@ class ExternalAgent:
 
     def fetch_context(self, user_id: str) -> ScopeContext:
         now = datetime.now(timezone.utc)
-        subs, likes, channel_topics, video_topics = _load_data(DATA_DIR)
-        profile = extract_profile(subs, likes, channel_topics, video_topics, now)
+        subs, likes, channel_qids, video_qids, topic_meta = _load_data(DATA_DIR)
+        profile = extract_profile(
+            subs, likes, channel_qids, video_qids, now, topic_meta=topic_meta,
+        )
         ctx: ScopeContext = cast(ScopeContext, {"profile": profile})
         return ctx
 
@@ -238,12 +269,15 @@ class ExternalAgent:
         seed = (user_id, profile["computed_at"])
         candidates = _top_n_seeded(score, n=CANDIDATE_N, seed=seed)
 
+        topic_meta = profile.get("topic_meta", {})
         bundle = []
         for t in candidates:
             provenance = profile["topic_provenance"].get(t, [])
+            label = topic_meta.get(t, {}).get("label", t)
             bundle.append(
                 {
-                    "topic": t,
+                    "topic": t,         # QID (stable identity)
+                    "label": label,     # human-readable
                     "score": score[t],
                     "long_term": profile["long_term_topic_scores"].get(t, 0.0),
                     "recent": profile["recent_topic_scores"].get(t, 0.0),
@@ -258,6 +292,12 @@ class ExternalAgent:
                     "provenance_shape": compute_provenance_shape(provenance),
                 }
             )
+
+        # Drop topics whose primary like-anchor duplicates a higher-ranked
+        # topic — same source video reframed under two QIDs. Producer-side
+        # dedup catches cross-agent leaks; this catches the within-agent
+        # leak before the LLM ever sees the duplicates.
+        bundle = dedupe_bundle_by_anchor(bundle)
 
         if len(bundle) < MIN_PITCHES:
             return [_thin_signal_pitch()]
@@ -284,31 +324,35 @@ class ExternalAgent:
 
         pitches_fallback: list[Pitch] = []
         for item in selected:
-            topic = item["topic"]
+            label: str = item["label"]
             claim_kind: ClaimKind = item["claim_kind"]
             prov_shape: ProvenanceShape = item["provenance_shape"]
             contributors: list[Contributor] = item["provenance"]
 
-            hook = _template_hook(topic, claim_kind, contributors)
+            hook = _template_hook(label, claim_kind, contributors)
 
             source_refs = []
             for c in contributors:
                 if c["kind"] == "sub":
-                    source_refs.append(c["channel_id"])
-                elif c["video_id"]:
-                    source_refs.append(c["video_id"])
+                    source_refs.append(c["channel_name"])
+                elif c["video_title"]:
+                    source_refs.append(c["video_title"])
+                else:
+                    source_refs.append(c["channel_name"])
 
-            pitches_fallback.append(
-                Pitch(
-                    agent="external",
-                    title=_topic_label(topic).title(),
-                    hook=hook,
-                    source_refs=list(dict.fromkeys(source_refs)),
-                    priority=min(1.0, round(item["score"], 4)),
-                    thin_signal=False,
-                    claim_kind=claim_kind.value,
-                    provenance_shape=prov_shape.value,
-                )
+            pitch_kwargs = dict(
+                agent="external",
+                title=label.title(),
+                hook=hook,
+                source_refs=list(dict.fromkeys(source_refs)),
+                priority=min(1.0, round(item["score"], 4)),
+                thin_signal=False,
+                claim_kind=claim_kind.value,
+                provenance_shape=prov_shape.value,
             )
+            anchor = primary_anchor(contributors)
+            if anchor:
+                pitch_kwargs["anchor"] = anchor
+            pitches_fallback.append(Pitch(**pitch_kwargs))
 
         return pitches_fallback

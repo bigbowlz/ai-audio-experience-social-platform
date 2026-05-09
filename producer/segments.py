@@ -69,17 +69,42 @@ def select_guaranteed_slots(
     """
     guaranteed: list[Pitch] = []
     remaining: list[Pitch] = []
+    seen_anchors: set[str] = set()
 
     # Sort agents deterministically so iteration order doesn't depend on dict insertion.
     for agent in sorted(pitches_by_agent):
         pitches = pitches_by_agent[agent]
-        # Deterministic max: highest priority, then title ASC as final tiebreaker.
-        best = min(pitches, key=lambda p: (-p["priority"], p["title"]))
+        # Deterministic ordering: highest priority, then title ASC as final tiebreaker.
+        ordered = sorted(pitches, key=lambda p: (-p["priority"], p["title"]))
+
+        # Anchor-aware promotion: prefer the highest-priority pitch whose
+        # anchor doesn't collide with an already-selected guaranteed slot.
+        # If every option collides, fall back to the top-priority pick rather
+        # than skip the agent — guaranteed slots are about agent diversity.
+        chosen: Pitch = ordered[0]
+        for p in ordered:
+            a = p.get("anchor")
+            if a and a in seen_anchors:
+                continue
+            chosen = p
+            break
+
+        anchor = chosen.get("anchor")
+        if anchor:
+            seen_anchors.add(anchor)
+
         guaranteed.append(
-            {**best, "suggested_length_sec": _segment_length(best, length_overrides)}
+            {**chosen, "suggested_length_sec": _segment_length(chosen, length_overrides)}
         )
         for p in pitches:
-            if p is best:
+            if p is chosen:
+                continue
+            # Drop any pitch whose anchor was already accepted by a
+            # guaranteed slot — its narrative would duplicate a guaranteed
+            # segment. Pitches without an anchor (sub-only topics, weather,
+            # calendar) are never deduped here.
+            a = p.get("anchor")
+            if a and a in seen_anchors:
                 continue
             remaining.append(
                 {**p, "suggested_length_sec": _segment_length(p, length_overrides)}
