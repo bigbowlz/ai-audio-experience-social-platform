@@ -20,8 +20,8 @@ music = [
   "independent-music",
   "reggae",
   "rhythm-and-blues",
-  "music-of-asia",
-  "music-of-latin-america",
+  "Music_of_Asia",
+  "Music_of_Latin_America",
   "music-video-game",
 ]
 
@@ -29,4 +29,4 @@ music = [
 music = 1
 
 [weights.external]
-music = 1
+music = 0.5

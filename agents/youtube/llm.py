@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parents[2] / ".env")
 
 from agents.protocol import Brief, Pitch
-from agents.youtube.extractor import Contributor
+from agents.youtube.extractor import Contributor, primary_anchor
 from agents.youtube.guardrails import ClaimKind, ProvenanceShape
 
 # Prompt text lives in agents/youtube/prompts.py. Re-exported here so
@@ -64,7 +64,8 @@ def _format_bundle(
     for item in bundle:
         candidates.append(
             {
-                "topic": item["topic"],
+                "topic": item["topic"],          # QID
+                "label": item.get("label", item["topic"]),  # human-readable
                 "score": round(item["score"], 4),
                 "long_term": round(item["long_term"], 4),
                 "recent": round(item["recent"], 4),
@@ -151,25 +152,27 @@ def generate_pitches(
             else:
                 source_refs.append(c["channel_name"])
 
-        pitches.append(
-            Pitch(
-                agent=agent_name,
-                title=sel.get("title", topic.replace("-", " ").title()),
-                hook=sel["hook"],
-                source_refs=list(dict.fromkeys(source_refs)),
-                priority=min(1.0, max(0.0, float(sel.get("priority", item["score"])))),
-                thin_signal=False,
-                claim_kind=(
-                    claim_kind.value
-                    if isinstance(claim_kind, ClaimKind)
-                    else claim_kind
-                ),
-                provenance_shape=(
-                    prov_shape.value
-                    if isinstance(prov_shape, ProvenanceShape)
-                    else prov_shape
-                ),
-            )
+        pitch_kwargs = dict(
+            agent=agent_name,
+            title=sel.get("title", item.get("label", topic).title()),
+            hook=sel["hook"],
+            source_refs=list(dict.fromkeys(source_refs)),
+            priority=min(1.0, max(0.0, float(sel.get("priority", item["score"])))),
+            thin_signal=False,
+            claim_kind=(
+                claim_kind.value
+                if isinstance(claim_kind, ClaimKind)
+                else claim_kind
+            ),
+            provenance_shape=(
+                prov_shape.value
+                if isinstance(prov_shape, ProvenanceShape)
+                else prov_shape
+            ),
         )
+        anchor = primary_anchor(contributors)
+        if anchor:
+            pitch_kwargs["anchor"] = anchor
+        pitches.append(Pitch(**pitch_kwargs))
 
     return pitches

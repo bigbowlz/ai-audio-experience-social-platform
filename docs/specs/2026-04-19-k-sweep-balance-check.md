@@ -1,5 +1,7 @@
 # K-sweep balance check for pre-LLM pitch pool
 
+> **Historical note (2026-05-07):** This spec was written when scoring used per-window TF-IDF over kebab-slug topics. Aggregation has since been replaced with fractional counting (`1/|T_d|`) over Wikidata QIDs — see [`agents/youtube/docs/DESIGN.md` §Aggregation](../../agents/youtube/docs/DESIGN.md). The K knob still exists with the same semantics (it lives in the blend, not in the per-window aggregation). The "alices_agent" in this doc is now [`agents/external/agent.py`](../../agents/external/agent.py). The current production K is `10` (set in `agents/youtube/extractor.py`). The TF-IDF prose below describes the *prior* aggregation and is preserved for context; treat it as archival.
+
 **Status:** APPROVED — brainstorming cleared 2026-04-19
 **Parent docs:**
 

@@ -118,13 +118,50 @@ def test_hydrate_calls_seed_per_agent(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         "learning_loop.hydrate_topic_multipliers.seed_topic_multiplier", seed
     )
+    monkeypatch.setattr(
+        "learning_loop.hydrate_topic_multipliers.canonicalize",
+        lambda inputs: {
+            "rock_music": {"qid": "Q11399", "label": "Rock music",
+                           "canonical_url": "https://en.wikipedia.org/wiki/Rock_music"},
+            "pop_music":  {"qid": "Q37073", "label": "Pop music",
+                           "canonical_url": "https://en.wikipedia.org/wiki/Pop_music"},
+        },
+    )
     result = hydrate_topic_multipliers("dev", path=p)
 
     assert seed.call_count == 2
     calls = {args[1]: args[2] for args, _ in seed.call_args_list}  # {agent: weights}
-    assert calls["youtube"]  == {"rock-music": 0.5, "pop-music": 0.5}
-    assert calls["external"] == {"rock-music": 0.3, "pop-music": 0.3}
+    assert calls["youtube"]  == {"Q11399": 0.5, "Q37073": 0.5}
+    assert calls["external"] == {"Q11399": 0.3, "Q37073": 0.3}
     assert result == calls
+
+
+def test_hydrate_logs_and_skips_unresolved_slugs(tmp_path: Path, monkeypatch, caplog):
+    p = tmp_path / "w.toml"
+    p.write_text(
+        '[weights.youtube]\n'
+        '"rock-music" = 0.5\n'
+        '"made-up-slug" = 0.7\n'
+    )
+    seed = mock.Mock()
+    monkeypatch.setattr(
+        "learning_loop.hydrate_topic_multipliers.seed_topic_multiplier", seed
+    )
+    monkeypatch.setattr(
+        "learning_loop.hydrate_topic_multipliers.canonicalize",
+        lambda inputs: {
+            "rock_music":   {"qid": "Q11399", "label": "Rock music",
+                             "canonical_url": "https://en.wikipedia.org/wiki/Rock_music"},
+            "made_up_slug": None,
+        },
+    )
+    import logging
+    with caplog.at_level(logging.WARNING):
+        result = hydrate_topic_multipliers("dev", path=p)
+
+    assert result == {"youtube": {"Q11399": 0.5}}
+    assert seed.call_count == 1
+    assert any("made-up-slug" in rec.message for rec in caplog.records)
 
 
 def test_hydrate_returns_empty_when_no_weights_section(tmp_path: Path, monkeypatch):

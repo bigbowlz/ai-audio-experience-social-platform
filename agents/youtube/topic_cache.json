@@ -1,0 +1,250 @@
+{
+  "qid_to_meta": {
+    "Q11016": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Technology",
+      "label": "Technology"
+    },
+    "Q11399": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Rock_music",
+      "label": "Rock music"
+    },
+    "Q11401": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Hip-hop",
+      "label": "Hip-hop"
+    },
+    "Q11424": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Film",
+      "label": "Film"
+    },
+    "Q12147": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Health",
+      "label": "Health"
+    },
+    "Q12684": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Fashion",
+      "label": "Fashion"
+    },
+    "Q131272": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Soul_music",
+      "label": "Soul music"
+    },
+    "Q15416": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Television_show",
+      "label": "Television show"
+    },
+    "Q1610017": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Simulation_video_game",
+      "label": "Simulation video game"
+    },
+    "Q173799": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Entertainment",
+      "label": "Entertainment"
+    },
+    "Q184485": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Performing_arts",
+      "label": "Performing arts"
+    },
+    "Q2095": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Food",
+      "label": "Food"
+    },
+    "Q270948": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Action_game",
+      "label": "Action game"
+    },
+    "Q309252": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Physical_fitness",
+      "label": "Physical fitness"
+    },
+    "Q32090": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Lifestyle",
+      "label": "Lifestyle"
+    },
+    "Q343568": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Action-adventure_game",
+      "label": "Action-adventure game"
+    },
+    "Q349": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Sport",
+      "label": "Sport"
+    },
+    "Q35874": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Humour",
+      "label": "Humour"
+    },
+    "Q37073": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Pop_music",
+      "label": "Pop music"
+    },
+    "Q39201": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Pet",
+      "label": "Pet"
+    },
+    "Q42201": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Independent_music",
+      "label": "Independent music"
+    },
+    "Q42889": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Vehicle",
+      "label": "Vehicle"
+    },
+    "Q45981": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Rhythm_and_blues",
+      "label": "Rhythm and blues"
+    },
+    "Q472055": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Strategy_video_game",
+      "label": "Strategy video game"
+    },
+    "Q47728": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Hobby",
+      "label": "Hobby"
+    },
+    "Q4830453": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Business",
+      "label": "Business"
+    },
+    "Q49389": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Tourism",
+      "label": "Tourism"
+    },
+    "Q525073": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Music_of_Asia",
+      "label": "Music of Asia"
+    },
+    "Q584105": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Music_video_game",
+      "label": "Music video game"
+    },
+    "Q638": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Music",
+      "label": "Music"
+    },
+    "Q6452410": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Christian_music",
+      "label": "Christian music"
+    },
+    "Q7163": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Politics",
+      "label": "Politics"
+    },
+    "Q727781": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Music_of_Latin_America",
+      "label": "Music of Latin America"
+    },
+    "Q744038": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Role-playing_video_game",
+      "label": "Role-playing video game"
+    },
+    "Q7927912": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Video_game_culture",
+      "label": "Video game culture"
+    },
+    "Q8341": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Jazz",
+      "label": "Jazz"
+    },
+    "Q83440": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Country_music",
+      "label": "Country music"
+    },
+    "Q8425": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Society",
+      "label": "Society"
+    },
+    "Q9081": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Knowledge",
+      "label": "Knowledge"
+    },
+    "Q9174": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Religion",
+      "label": "Religion"
+    },
+    "Q9730": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Classical_music",
+      "label": "Classical music"
+    },
+    "Q9778": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Electronic_music",
+      "label": "Electronic music"
+    },
+    "Q9794": {
+      "canonical_url": "https://en.wikipedia.org/wiki/Reggae",
+      "label": "Reggae"
+    }
+  },
+  "url_to_qid": {
+    "https://en.wikipedia.org/wiki/Action-adventure_game": "Q343568",
+    "https://en.wikipedia.org/wiki/Action_game": "Q270948",
+    "https://en.wikipedia.org/wiki/Business": "Q4830453",
+    "https://en.wikipedia.org/wiki/Christian_music": "Q6452410",
+    "https://en.wikipedia.org/wiki/Classical_music": "Q9730",
+    "https://en.wikipedia.org/wiki/Electronic_music": "Q9778",
+    "https://en.wikipedia.org/wiki/Entertainment": "Q173799",
+    "https://en.wikipedia.org/wiki/Fashion": "Q12684",
+    "https://en.wikipedia.org/wiki/Film": "Q11424",
+    "https://en.wikipedia.org/wiki/Food": "Q2095",
+    "https://en.wikipedia.org/wiki/Health": "Q12147",
+    "https://en.wikipedia.org/wiki/Hip_hop_music": "Q11401",
+    "https://en.wikipedia.org/wiki/Hobby": "Q47728",
+    "https://en.wikipedia.org/wiki/Humour": "Q35874",
+    "https://en.wikipedia.org/wiki/Independent_music": "Q42201",
+    "https://en.wikipedia.org/wiki/Jazz": "Q8341",
+    "https://en.wikipedia.org/wiki/Knowledge": "Q9081",
+    "https://en.wikipedia.org/wiki/Lifestyle_(sociology)": "Q32090",
+    "https://en.wikipedia.org/wiki/Music": "Q638",
+    "https://en.wikipedia.org/wiki/Music-of-Asia": null,
+    "https://en.wikipedia.org/wiki/Music_Of_Asia": null,
+    "https://en.wikipedia.org/wiki/Music_of_Asia": "Q525073",
+    "https://en.wikipedia.org/wiki/Music_of_Latin_America": "Q727781",
+    "https://en.wikipedia.org/wiki/Performing_arts": "Q184485",
+    "https://en.wikipedia.org/wiki/Pet": "Q39201",
+    "https://en.wikipedia.org/wiki/Physical_fitness": "Q309252",
+    "https://en.wikipedia.org/wiki/Politics": "Q7163",
+    "https://en.wikipedia.org/wiki/Pop_music": "Q37073",
+    "https://en.wikipedia.org/wiki/Religion": "Q9174",
+    "https://en.wikipedia.org/wiki/Rhythm_and_blues": "Q45981",
+    "https://en.wikipedia.org/wiki/Rock_music": "Q11399",
+    "https://en.wikipedia.org/wiki/Role-playing_video_game": "Q744038",
+    "https://en.wikipedia.org/wiki/Simulation_video_game": "Q1610017",
+    "https://en.wikipedia.org/wiki/Society": "Q8425",
+    "https://en.wikipedia.org/wiki/Soul_music": "Q131272",
+    "https://en.wikipedia.org/wiki/Sport": "Q349",
+    "https://en.wikipedia.org/wiki/Strategy_video_game": "Q472055",
+    "https://en.wikipedia.org/wiki/Technology": "Q11016",
+    "https://en.wikipedia.org/wiki/Television_program": "Q15416",
+    "https://en.wikipedia.org/wiki/Tourism": "Q49389",
+    "https://en.wikipedia.org/wiki/Vehicle": "Q42889",
+    "https://en.wikipedia.org/wiki/Video_game_culture": "Q7927912",
+    "https://en.wikipedia.org/wiki/christian-music": null,
+    "https://en.wikipedia.org/wiki/christian_music": "Q6452410",
+    "https://en.wikipedia.org/wiki/classical-music": null,
+    "https://en.wikipedia.org/wiki/classical_music": "Q9730",
+    "https://en.wikipedia.org/wiki/country-music": "Q83440",
+    "https://en.wikipedia.org/wiki/country_music": "Q83440",
+    "https://en.wikipedia.org/wiki/electronic-music": null,
+    "https://en.wikipedia.org/wiki/electronic_music": "Q9778",
+    "https://en.wikipedia.org/wiki/hip-hop-music": null,
+    "https://en.wikipedia.org/wiki/hip_hop_music": "Q11401",
+    "https://en.wikipedia.org/wiki/independent-music": null,
+    "https://en.wikipedia.org/wiki/independent_music": "Q42201",
+    "https://en.wikipedia.org/wiki/jazz": "Q8341",
+    "https://en.wikipedia.org/wiki/music": "Q638",
+    "https://en.wikipedia.org/wiki/music-Of-asia": null,
+    "https://en.wikipedia.org/wiki/music-of-asia": null,
+    "https://en.wikipedia.org/wiki/music-of-latin-america": null,
+    "https://en.wikipedia.org/wiki/music-video-game": null,
+    "https://en.wikipedia.org/wiki/music_of_asia": null,
+    "https://en.wikipedia.org/wiki/music_of_latin_america": null,
+    "https://en.wikipedia.org/wiki/music_video_game": "Q584105",
+    "https://en.wikipedia.org/wiki/pop-music": "Q37073",
+    "https://en.wikipedia.org/wiki/pop_music": "Q37073",
+    "https://en.wikipedia.org/wiki/reggae": "Q9794",
+    "https://en.wikipedia.org/wiki/rhythm-and-blues": "Q45981",
+    "https://en.wikipedia.org/wiki/rhythm_and_blues": "Q45981",
+    "https://en.wikipedia.org/wiki/rock-music": null,
+    "https://en.wikipedia.org/wiki/rock_music": "Q11399",
+    "https://en.wikipedia.org/wiki/soul-music": null,
+    "https://en.wikipedia.org/wiki/soul_music": "Q131272"
+  }
+}

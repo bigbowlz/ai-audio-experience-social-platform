@@ -4,7 +4,7 @@
 **Master doc:** [`~/.gstack/projects/bigbowlz-ai-audio-experience-social-platform/wanlizhou-main-design-20260413-182237.md`](../../../../.gstack/projects/bigbowlz-ai-audio-experience-social-platform/wanlizhou-main-design-20260413-182237.md) — canonical source; this doc is scoped to the `agents` component only.
 **Child specs:**
 
-- [`agents/youtube/docs/DESIGN.md`](../youtube/docs/DESIGN.md) — `InterestProfile`, TF-IDF, K=5 provenance, `pitch()` flow, `AgentMemory` schema (locked 2026-04-15)
+- [`agents/youtube/docs/DESIGN.md`](../youtube/docs/DESIGN.md) — `InterestProfile`, fractional counting on Wikidata QIDs, K=5 provenance, `pitch()` flow, `AgentMemory` schema (locked 2026-04-15; aggregation revised 2026-05-07)
 - [`agents/docs/prompt_design.md`](prompt_design.md) — hook guardrails (`claim_kind`, `provenance_shape`), today's-context handoff, Producer running-order, `EpisodeScript` output
   **Reviewed:** 2026-04-13 (spec review 6/10, red-team); reconciled 2026-04-15 against child specs
 
@@ -15,7 +15,7 @@ Four agents that produce ranked `Pitch` objects for the Producer. Each owns its 
 - `youtube_agent` (internal, user-selected) — YouTube subscriptions + recency signals (live OAuth)
 - `calendar_agent` (internal, user-selected) — Google Calendar events (live OAuth)
 - `weather_agent` (internal, user-selected) — Open-Meteo (free, no key; requires GPS location)
-- `alices_agent` (external, Producer-invoked, has `price_usdc` + `wallet_address`) — @GoddamnAxl (pre-captured data)
+- `alices_agent` (external, Producer-invoked, has `price_usdc` + `wallet_address`) — @guest(pre-captured data)
 
 ## Agent Selection & Auth Sequence (decided 2026-04-16)
 
@@ -217,12 +217,12 @@ still consumed via SSE.
 not in per-pitch Pitch fields — identical across every pitch of a given
 agent, so it belongs in the Producer's prompt, not the hook):
 
-| `agent`    | Whose taste?                          | Producer narrates as...                             |
-| ---------- | ------------------------------------- | --------------------------------------------------- |
-| `youtube`  | listener's own (live OAuth)           | second person — "you've been into X"                |
-| `alices` | external curator (pre-captured Day-0) | third person — "Alice's been into X"; never "you" |
-| `weather`  | neither (environmental)               | ground-truth facts about the listener's day         |
-| `calendar` | neither (schedule)                    | ground-truth facts about the listener's day         |
+| `agent`    | Whose taste?                          | Producer narrates as...                           |
+| ---------- | ------------------------------------- | ------------------------------------------------- |
+| `youtube`  | listener's own (live OAuth)           | second person — "you've been into X"              |
+| `alices`   | external curator (pre-captured Day-0) | third person — "Alice's been into X"; never "you" |
+| `weather`  | neither (environmental)               | ground-truth facts about the listener's day       |
+| `calendar` | neither (schedule)                    | ground-truth facts about the listener's day       |
 
 - **`thin_signal`** (`bool`): `true` iff agent emitted exactly 1 pitch due to insufficient data. Producer uses this for time-budget allocation only; no special user-facing language.
 - **`claim_kind`** (`"durable" | "rising" | "discovery" | "neutral"`): deterministic temporal-framing constraint. See prompt_design.md §1 for preconditions and LLM prompt contract. Computed by `youtube_agent` and `alices_agent` (both use the shared extractor and `InterestProfile`). Weather and calendar agents default to `"neutral"`.
@@ -234,7 +234,7 @@ agent, so it belongs in the Producer's prompt, not the hook):
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | `learning-loop` | `AgentMemory` shape, `EpisodeSignals` shape (both locked 2026-04-15 in `agents/youtube/docs/DESIGN.md`); learning-loop owns signal-derived writes. **v0 stubbed** — no writes in v0; see `learning_loop/docs/DESIGN.md` §v0 stub contract | agents consume memory schema; no `observe()` hook |
 | `producer`      | consumes `list[Pitch]`                                                                                                                                                                                                                    | agents emit; producer ranks                       |
-| `payment`       | `alices_agent` has `wallet_address` that receives tx                                                                                                                                                                                    | payment reads wallet from agent                   |
+| `payment`       | `alices_agent` has `wallet_address` that receives tx                                                                                                                                                                                      | payment reads wallet from agent                   |
 | `api-storage`   | `agent_memory` table (jsonb per user_id+agent_name)                                                                                                                                                                                       | agents persist through api-storage                |
 
 ## Build plan touchpoints
@@ -260,7 +260,7 @@ agent, so it belongs in the Producer's prompt, not the hook):
 
 **Producer sees only the scalar `priority`, never raw scores or memory.** This IS the memory-isolation invariant (P9) in executable form.
 
-The original sigmoid formula (`entity_scores`, `topic_scores`, `pitch.topic_tags`) was a pre-youtube-spec placeholder. The youtube spec's `InterestProfile` replaced entity-level scoring with topic-level TF-IDF; memory replaced `entity_scores`/`topic_scores` with `topic_multiplier: dict[str, float]`. The sigmoid is superseded.
+The original sigmoid formula (`entity_scores`, `topic_scores`, `pitch.topic_tags`) was a pre-youtube-spec placeholder. The youtube spec's `InterestProfile` replaced entity-level scoring with topic-level fractional-counting on Wikidata QIDs (revised 2026-05-07 from an earlier per-window TF-IDF); memory replaced `entity_scores`/`topic_scores` with `topic_multiplier: dict[QID, float]`. The sigmoid is superseded.
 
 ### 2. SSE `phase` field missing on agent events (A-Completeness, severity: medium)
 

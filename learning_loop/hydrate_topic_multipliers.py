@@ -32,6 +32,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from agents.youtube.canonicalize import canonicalize
 from learning_loop import seed_topic_multiplier
 
 log = logging.getLogger(__name__)
@@ -120,8 +121,41 @@ def hydrate_topic_multipliers(
     seeded: dict[str, dict[str, float]] = {}
     for agent_name in weights_table:
         resolved = resolve_weights(config, agent_name)
-        if resolved:
-            seed_topic_multiplier(user_id, agent_name, resolved)
-            seeded[agent_name] = resolved
+        if not resolved:
+            continue
+        qid_keyed = _slugs_to_qids(resolved, agent_name)
+        if qid_keyed:
+            seed_topic_multiplier(user_id, agent_name, qid_keyed)
+            seeded[agent_name] = qid_keyed
 
     return seeded
+
+
+def _slugs_to_qids(
+    slug_weights: dict[str, float],
+    agent_name: str,
+) -> dict[str, float]:
+    """Canonicalize Wikipedia-page slugs to Wikidata QIDs.
+
+    Agent scoring is keyed by QID (see InterestProfile.combined_topic_scores),
+    so the seeded multiplier must be QID-keyed for `multiplier.get(qid, 1.0)`
+    in pitch() to actually fire. Slugs that don't resolve are dropped with a
+    warning — usually means the slug needs to be the proper Wikipedia title
+    (e.g. `Music_of_Asia`, not `music-of-asia`) because Wikipedia is
+    case-sensitive past the first character.
+    """
+    inputs = {slug: slug.replace("-", "_") for slug in slug_weights}
+    resolved = canonicalize(list(inputs.values()))
+
+    out: dict[str, float] = {}
+    for slug, weight in slug_weights.items():
+        ct = resolved.get(inputs[slug])
+        if ct is None:
+            log.warning(
+                "topic_weights.toml: slug %r in [weights.%s] did not resolve "
+                "to a Wikidata QID; multiplier ignored",
+                slug, agent_name,
+            )
+            continue
+        out[ct["qid"]] = weight
+    return out

@@ -58,8 +58,25 @@ def _batched(seq: list, n: int):
 
 # ── Capture ──────────────────────────────────────────────────────────
 
-def capture(session: AuthorizedSession, out_dir: Path) -> Path:
+def _read_or_none(path: Path) -> dict | None:
+    """Return parsed JSON if path exists and is non-empty, else None."""
+    if path.exists() and path.stat().st_size > 0:
+        with open(path) as f:
+            return json.load(f)
+    return None
+
+
+def capture(
+    session: AuthorizedSession,
+    out_dir: Path,
+    force: bool = False,
+) -> Path:
     """Fetch YouTube signals and write the four JSON files to out_dir.
+
+    Each numbered output file is a checkpoint: if it exists and is non-empty,
+    that step is skipped. Pass force=True to re-fetch everything. Steps 3 and
+    4 still need data from steps 1 and 2 (channel/video IDs), which is read
+    back from disk on a skip.
 
     Returns out_dir (same path passed in, for callers that want to set
     YOUTUBE_PROBE_DIR from it).
@@ -68,102 +85,127 @@ def capture(session: AuthorizedSession, out_dir: Path) -> Path:
     print(f"Output: {out_dir}")
 
     # 1) Subscriptions — all pages, snippet+contentDetails for subscribe timestamp
-    print("→ subscriptions.list?mine=true (paginated)")
-    subs = _paginate(
-        session, "subscriptions",
-        part="snippet,contentDetails",
-        mine="true",
-        maxResults=50,
-    )
-    (out_dir / "02_subscriptions.json").write_text(
-        json.dumps({"count": len(subs), "items": subs}, indent=2, ensure_ascii=False)
-    )
-    print(f"  {len(subs)} subscriptions")
+    subs_path = out_dir / "02_subscriptions.json"
+    cached = None if force else _read_or_none(subs_path)
+    if cached is not None:
+        subs = cached["items"]
+        print(f"  skip 02 (exists, {len(subs)} subscriptions)")
+    else:
+        print("→ subscriptions.list?mine=true (paginated)")
+        subs = _paginate(
+            session, "subscriptions",
+            part="snippet,contentDetails",
+            mine="true",
+            maxResults=50,
+        )
+        subs_path.write_text(
+            json.dumps({"count": len(subs), "items": subs}, indent=2, ensure_ascii=False)
+        )
+        print(f"  {len(subs)} subscriptions")
 
     # 2) Liked videos — all pages from LL playlist
-    print("→ playlistItems.list?playlistId=LL (paginated)")
-    likes = _paginate(
-        session, "playlistItems",
-        part="snippet,contentDetails",
-        playlistId="LL",
-        maxResults=50,
-    )
-    (out_dir / "03_likes.json").write_text(
-        json.dumps({"count": len(likes), "items": likes}, indent=2, ensure_ascii=False)
-    )
-    print(f"  {len(likes)} liked videos")
+    likes_path = out_dir / "03_likes.json"
+    cached = None if force else _read_or_none(likes_path)
+    if cached is not None:
+        likes = cached["items"]
+        print(f"  skip 03 (exists, {len(likes)} liked videos)")
+    else:
+        print("→ playlistItems.list?playlistId=LL (paginated)")
+        likes = _paginate(
+            session, "playlistItems",
+            part="snippet,contentDetails",
+            playlistId="LL",
+            maxResults=50,
+        )
+        likes_path.write_text(
+            json.dumps({"count": len(likes), "items": likes}, indent=2, ensure_ascii=False)
+        )
+        print(f"  {len(likes)} liked videos")
 
     # 3) Channel topic details — all subscribed channels, batched 50 at a time
-    print("→ channels.list?id=<all subs>&part=topicDetails (batched)")
-    sub_channel_ids = [
-        s["snippet"]["resourceId"]["channelId"]
-        for s in subs
-        if "snippet" in s and "resourceId" in s.get("snippet", {})
-    ]
-    channel_items: list[dict] = []
-    for chunk in _batched(sub_channel_ids, 50):
-        data = _get(
-            session, "channels",
-            part="snippet,topicDetails",
-            id=",".join(chunk),
-            maxResults=50,
+    chan_path = out_dir / "07_topic_details.json"
+    cached = None if force else _read_or_none(chan_path)
+    if cached is not None:
+        n = len(cached.get("items", []))
+        print(f"  skip 07 ({n} channels with topic details cached)")
+    else:
+        print("→ channels.list?id=<all subs>&part=topicDetails (batched)")
+        sub_channel_ids = [
+            s["snippet"]["resourceId"]["channelId"]
+            for s in subs
+            if "snippet" in s and "resourceId" in s.get("snippet", {})
+        ]
+        channel_items: list[dict] = []
+        for chunk in _batched(sub_channel_ids, 50):
+            data = _get(
+                session, "channels",
+                part="snippet,topicDetails",
+                id=",".join(chunk),
+                maxResults=50,
+            )
+            channel_items.extend(data.get("items", []))
+        chan_path.write_text(
+            json.dumps({"items": channel_items}, indent=2, ensure_ascii=False)
         )
-        channel_items.extend(data.get("items", []))
-    (out_dir / "07_topic_details.json").write_text(
-        json.dumps({"items": channel_items}, indent=2, ensure_ascii=False)
-    )
-    covered = sum(
-        1 for it in channel_items
-        if it.get("topicDetails", {}).get("topicCategories")
-    )
-    print(f"  {covered}/{len(channel_items)} channels have topicDetails")
+        covered = sum(
+            1 for it in channel_items
+            if it.get("topicDetails", {}).get("topicCategories")
+        )
+        print(f"  {covered}/{len(channel_items)} channels have topicDetails")
 
     # 4) Video topic details — all liked video IDs, batched 50 at a time
-    print("→ videos.list?id=<liked ids>&part=topicDetails,snippet (batched)")
-    video_ids = [
-        item["contentDetails"]["videoId"]
-        for item in likes
-        if item.get("contentDetails", {}).get("videoId")
-    ]
-    video_items: list[dict] = []
-    for chunk in _batched(video_ids, 50):
-        data = _get(
-            session, "videos",
-            part="snippet,topicDetails",
-            id=",".join(chunk),
-            maxResults=50,
+    vid_path = out_dir / "08_video_topic_details.json"
+    cached = None if force else _read_or_none(vid_path)
+    if cached is not None:
+        n = len(cached.get("per_video", []))
+        print(f"  skip 08 ({n} videos with topic details cached)")
+    else:
+        print("→ videos.list?id=<liked ids>&part=topicDetails,snippet (batched)")
+        video_ids = [
+            item["contentDetails"]["videoId"]
+            for item in likes
+            if item.get("contentDetails", {}).get("videoId")
+        ]
+        video_items: list[dict] = []
+        for chunk in _batched(video_ids, 50):
+            data = _get(
+                session, "videos",
+                part="snippet,topicDetails",
+                id=",".join(chunk),
+                maxResults=50,
+            )
+            video_items.extend(data.get("items", []))
+
+        per_video = []
+        for it in video_items:
+            cats = it.get("topicDetails", {}).get("topicCategories", [])
+            tags = [u.rsplit("/", 1)[-1] for u in cats]
+            per_video.append({
+                "id": it["id"],
+                "title": it.get("snippet", {}).get("title", it["id"]),
+                "channel": it.get("snippet", {}).get("channelTitle", "?"),
+                "tags": tags,
+                "category_id": it.get("snippet", {}).get("categoryId"),
+            })
+
+        returned_ids = {it["id"] for it in video_items}
+        missing = [vid for vid in video_ids if vid not in returned_ids]
+        with_topics = sum(1 for v in per_video if v["tags"])
+
+        vid_path.write_text(
+            json.dumps(
+                {
+                    "requested": len(video_ids),
+                    "returned_by_api": len(video_items),
+                    "missing_from_api": missing,
+                    "with_nonempty_topicDetails": with_topics,
+                    "per_video": per_video,
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
         )
-        video_items.extend(data.get("items", []))
-
-    per_video = []
-    for it in video_items:
-        cats = it.get("topicDetails", {}).get("topicCategories", [])
-        tags = [u.rsplit("/", 1)[-1] for u in cats]
-        per_video.append({
-            "id": it["id"],
-            "title": it.get("snippet", {}).get("title", it["id"]),
-            "channel": it.get("snippet", {}).get("channelTitle", "?"),
-            "tags": tags,
-        })
-
-    returned_ids = {it["id"] for it in video_items}
-    missing = [vid for vid in video_ids if vid not in returned_ids]
-    with_topics = sum(1 for v in per_video if v["tags"])
-
-    (out_dir / "08_video_topic_details.json").write_text(
-        json.dumps(
-            {
-                "requested": len(video_ids),
-                "returned_by_api": len(video_items),
-                "missing_from_api": missing,
-                "with_nonempty_topicDetails": with_topics,
-                "per_video": per_video,
-            },
-            indent=2,
-            ensure_ascii=False,
-        )
-    )
-    print(f"  {with_topics}/{len(video_items)} videos have topicDetails")
+        print(f"  {with_topics}/{len(video_items)} videos have topicDetails")
     print(f"Done. Files written to {out_dir}")
     return out_dir
 
@@ -173,6 +215,7 @@ def capture(session: AuthorizedSession, out_dir: Path) -> Path:
 def oauth_and_capture(
     out_dir: Path | None = None,
     credentials_path: Path | None = None,
+    force: bool = False,
 ) -> Path:
     """Run the YouTube Data API OAuth flow and capture probe data.
 
@@ -197,7 +240,7 @@ def oauth_and_capture(
     flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), _SCOPES)
     creds = flow.run_local_server(port=0)
     session = AuthorizedSession(creds)
-    return capture(session, out)
+    return capture(session, out, force=force)
 
 
 def main() -> None:
@@ -210,8 +253,12 @@ def main() -> None:
         "--credentials", type=Path, default=_CREDENTIALS,
         help=f"OAuth desktop client secrets JSON (default: {_CREDENTIALS})",
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Re-fetch all steps even if output files already exist.",
+    )
     args = parser.parse_args()
-    oauth_and_capture(out_dir=args.out, credentials_path=args.credentials)
+    oauth_and_capture(out_dir=args.out, credentials_path=args.credentials, force=args.force)
 
 
 if __name__ == "__main__":

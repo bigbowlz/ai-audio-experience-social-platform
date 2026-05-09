@@ -2,7 +2,7 @@
 
 **Status:** DRAFT (2026-04-15)
 **Parent:** [`agents/docs/DESIGN.md`](DESIGN.md) — `DataAgent` protocol, `Pitch` shape, `Brief` shape
-**YouTube agent spec:** [`agents/youtube/docs/DESIGN.md`](../youtube/docs/DESIGN.md) — `InterestProfile`, TF-IDF, K=5 provenance, `pitch()` flow
+**YouTube agent spec:** [`agents/youtube/docs/DESIGN.md`](../youtube/docs/DESIGN.md) — `InterestProfile`, fractional counting on Wikidata QIDs, K=5 provenance, `pitch()` flow
 **Scope:** Two LLM boundaries — (1) each domain agent's `pitch()` call, (2) the Producer's episode-script call. Covers hook guardrails, provenance-shape handling, today's-context handoff, and running-order assembly.
 
 **Out of scope:** InterestProfile internals (locked in youtube spec), learning-loop update rules (separate session), weather/calendar agent internals (undesigned — this doc specifies only their interface with the prompting layer).

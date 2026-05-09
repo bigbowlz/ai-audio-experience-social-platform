@@ -274,62 +274,66 @@ AgentMemory(
 3. `topic_multiplier == {}` → `pitch()`'s `.get(T, 1.0)` default makes this identical to "all topics at neutral multiplier." No cold-start branching required inside `pitch()`.
 4. At session-end, learning-loop applies reactions (if any) → first non-empty `topic_multiplier` snapshot persists. **v0 stub:** this step does not fire in v0. `topic_multiplier` stays `{}` across episodes unless fixture-seeded.
 
-## Aggregation: TF-IDF with sublinear TF and L1 normalization (decided 2026-04-14, IDF scope revised 2026-04-15)
+## Aggregation: fractional counting on Wikidata QIDs (revised 2026-05-07)
 
-Topic scores use TF-IDF, computed independently per window (IDF included — see below), with sublinear TF scaling and L1 normalization per window.
+Topic scores use **fractional counting** (uniform allocation): each tagged entity (sub or like) casts a unit vote split equally across its topics. The per-window weights are L1-normalized to a probability distribution over topics, and the two windows are then blended (§Blend).
 
 **All `log` references in this section are natural log (Python `math.log`).**
 
-**Document set for IDF — per window (revised 2026-04-15).** A "document" is a tagged entity. Long-term IDF treats each subscribed channel as one doc (`N_long = len(subs)`); recent IDF treats each liked video as one doc (`N_recent = len(likes)`). For topic `T` in a given window, `df_window(T)` = count of entities in *that* window whose topic list contains `T`. IDF is computed independently per window:
+> **History (2026-04-14 → 2026-05-07).** v0 used a TF-IDF formulation with sublinear TF and per-window IDF computed over the user's own library (`log((N_window + 1) / df_window(T))`). Two issues motivated the rewrite for v1:
+>
+> 1. **Within-user IDF inverts intent.** IDF is meant to discount globally common terms against a corpus you're retrieving from. Using the *user's own* subs/likes as the IDF corpus penalizes a user's strongest interests — a user with 20 music subs has `df(music) ≈ N`, so `idf(music) → 0` and "music" gets driven out of their profile despite being the dominant signal. The radio app has no candidate-item corpus to retrieve against, so the IDF term had no principled home.
+> 2. **TF aggregation was at the user level, IDF at the document level.** The original formula was a TF-IDF/profile hybrid with no clean retrieval interpretation.
+>
+> The new formulation drops IDF entirely and uses per-document fractional counting, which has a clean probabilistic reading: the score is `P(topic = t)` under the generative model "pick a random sub/like, then pick one of its topics uniformly at random." Over-tagged items naturally dilute their own vote via the `1/|T_d|` factor.
+
+### Topic identity: Wikidata QIDs (added 2026-05-07)
+
+The vocabulary `T` ranges over **Wikidata QIDs**, not raw Wikipedia URL slugs. A pre-extraction canonicalization pass resolves YouTube `topicCategories` URLs and bare page-name tags through the MediaWiki API (`prop=pageprops&ppprop=wikibase_item&redirects=1`), collapsing redirects, synonyms, normalization variants, and disambiguation-suffix collisions into stable identities. Implementation: [`agents/youtube/canonicalize.py`](../canonicalize.py); cache: [`agents/youtube/topic_cache.json`](../topic_cache.json) (committed snapshot, lazily extended on miss).
+
+Why QIDs:
+- Wikipedia URL slugs drift on rename; QIDs don't.
+- `Soccer`, `Association_football`, and `Football_(soccer)` collapse to one QID (`Q2736`) — synonym unification falls out of the API, no string-matching heuristics.
+- `Mercury_(planet)` and `Mercury_(element)` no longer collide after the strip-parentheticals rule the v0 normalizer used.
+- The profile carries `topic_meta: dict[QID, {label, canonical_url}]` so downstream consumers (LLM hook generation, orchestrator, Producer) render human labels without a second cache lookup.
+
+URLs that fail canonicalization (404, no Wikidata link) are dropped silently; they show up as untagged items reducing `tag_coverage_pct`. Negative results are cached as `null` so failed lookups aren't re-queried.
+
+### Scoring
+
+**Long-term (subs).** For each subscribed channel `C` with QID list `T_C`, contribute `1/|T_C|` to each `T ∈ T_C`:
 
 ```
-idf_long(T)   = log((N_long   + 1) / df_long(T))
-idf_recent(T) = log((N_recent + 1) / df_recent(T))
+w_long[T] += 1 / |T_C|     # for each sub C, for each T in T_C
 ```
 
-Empty windows (`N_window = 0`) skip IDF computation; the window returns `{}` per the empty-signal rule in §`InterestProfile` schema.
+Channels with empty `T_C` (no resolved QIDs) contribute nothing. Subscribing is a durable commitment and carries flat unit weight regardless of age — age lives in provenance (`Contributor.subscribed_at`), not in the score.
 
-**Numerator-only Laplace smoothing.** Without smoothing, when a topic tags every entity in a window (`df = N`) — e.g., a 3-sub user all tagged `music` — `log(N/df) = log(1) = 0` zeros out that topic and the user ends up with no scored profile despite clearly-observable taste. The chosen smoothing `log((N+1)/df)` is **asymmetric** — numerator only, not the symmetric textbook Laplace `log((N+1)/(df+1))`. The asymmetry preserves a stronger gap between rare and common terms at the low N that dominates v0 (dev's 96 subs / 77 likes is small by IR standards). Ordering between informative and uninformative topics is unchanged at meaningful N (lifestyle 7/20 vs. rare 1/20: ratio 0.35 → 0.36). A textbook-IDF auditor will flag the asymmetry; we accept that as a deliberate Laplace variant.
-
-**Term frequency, per window:**
-
-- **Long-term TF.** For each subscribed channel `C`, for each topic `T` in `channel_topics[C.channel_id]`:
-
-  ```
-  tf_long[T] += 1.0
-  ```
-
-  Subscribing is a durable commitment and carries flat weight regardless of age. Age is expressed in provenance via `Contributor.subscribed_at`, not by decaying the TF signal.
-
-- **Recent TF.** For each liked video `V` with like timestamp `liked_at`, compute `decayed_weight = exp(-(now - liked_at).days / 90)`. For each topic `T` in `video_topics[V.video_id]`:
-  ```
-  tf_recent[T] += decayed_weight
-  ```
-
-**Sublinear TF scaling (revised 2026-04-15).** After raw TF accumulation, apply per window:
+**Recent (likes).** For each liked video `V` with like timestamp `liked_at`, compute `δ_V = exp(-(now − liked_at).days · ln 2 / 90)` (90-day half-life — see §Recency decay). For each `T ∈ T_V`:
 
 ```
-tf[T] := log(1 + tf[T])
+w_recent[T] += δ_V / |T_V|     # for each like V, for each T in T_V
+total_recent_weight += δ_V
 ```
 
-Smooth, non-negative for all `tf ≥ 0`, monotone, no conditional needed. Prevents a single dominant source from swamping a topic's score — e.g., one channel with 20 likes shouldn't contribute 20× another channel's single like.
+`total_recent_weight` is computed from *every* like (including those with empty `T_V`) — it's a sample-size signal for the blend, not a scored quantity.
 
-**Why `log(1 + tf)` instead of the more common `1 + log(tf)`:** the recent window's TF is a sum of decayed weights, often fractional (e.g., one 270-day-old like has `decayed_weight ≈ 0.125`). The naive `1 + log(0.125) = -1.08` produces *negative* TF, breaks L1 normalization (sum can flip sign or vanish), and silently corrupts every recent score on aged-like data — precisely dev's own probe shape (77 likes spread over 8 years). `log(1 + tf)` is well-defined and non-negative for all `tf ≥ 0`, integer or fractional.
+**Length penalty does real work.** A liked video tagged with three QIDs contributes `δ_V/3` to each, vs. `δ_V` for a video tagged with one. Over-tagged items don't drown out specifically-tagged ones. Worked example: three likes today (δ ≈ 1) all tagged `Q-MUSIC`, with tag-list sizes 1, 2, 3 → pre-norm `w_recent[Q-MUSIC] = 1 + 1/2 + 1/3 ≈ 1.833`, plus `1/2 + 1/3 ≈ 0.833` mass distributed across the other tags. After L1: `Q-MUSIC ≈ 0.687`, balance ≈ 0.313 — music dominates without zeroing the supporting tags.
 
-**Score = TF × IDF (per-window), then L1-normalize per window:**
+**L1-normalize per window.**
 
 ```
-score[window][T] = tf_sublinear[window][T] × idf_window(T)
-score[window]    := score[window] / sum(score[window].values())   # L1
+long_term_scores = w_long  / sum(w_long.values())     # if non-empty
+recent_scores    = w_recent / sum(w_recent.values())  # if non-empty
 ```
 
-Empty windows (raw TF dict has no keys) skip normalization and return `{}`.
+With uniform `1/|T_d|` splitting and no decay, `sum(w_long.values()) = N_subs_with_resolved_qids`; for the recent window, `sum(w_recent.values()) = sum of δ_V over likes with resolved QIDs`. So `long_term_scores` and `recent_scores` are honest probability distributions over topics. Empty windows return `{}` per the empty-signal rule in §`InterestProfile` schema.
 
-**Why this handles broad-term pollution without extra filters.** In the long-term window, `lifestyle` appearing on 7 of dev's first 20 probed subs has `idf_long ≈ log(21/7) ≈ 1.10`. A rare genre on 1/20 has `idf_long ≈ log(21/1) ≈ 3.04`. Pervasive tags get ~3× penalized against rare ones automatically — no separate "drop topics appearing on >X% of channels" rule needed. Same logic applies independently inside the recent window with its own IDF.
+**Why this handles broad-term pollution.** Broad tags like `Lifestyle` (Q32090) tend to co-occur with many other tags on the same channel, so each broad-tag instance contributes a small `1/|T_C|` per item. Specifically-tagged channels (1-2 tags) push their narrow tags up much harder per item. The length penalty naturally suppresses broad tags relative to narrow ones — no separate "drop topics appearing on >X% of channels" rule needed.
 
-**Why per-window IDF (revised 2026-04-15 from shared user-IDF).** Earlier draft computed one IDF over `subs ∪ likes`. The flaw: a user with 96 subs (none `jazz`) and **10 jazz likes** vs. another with 96 subs (none `jazz`) and **2 jazz likes** — same user-level narrative ("jazz is their recent thing") — yields *lower* IDF for the active liker (`log(107/10) ≈ 2.37`) than the casual one (`log(99/2) ≈ 3.90`). More evidence → less informativeness, exactly backwards from intent. Per-window IDF answers "how informative is this topic *within this evidence base*" — the recent window's IDF doesn't dilute when a user racks up jazz likes; it stays self-consistent as a recent-attention measure. The L1 normalization per window already keeps cross-window comparison unit-consistent ("`recent['jazz'] > long_term['jazz']`" = "jazz is a bigger share of recent than long-term attention"); per-window IDF keeps the *within*-window comparisons honest too.
+**Why no shrinkage / smoothing in v0.** Bayesian shrinkage toward a prior (`(w + α·prior) / (N + α)`) requires either a fixed topic vocabulary (which Wikidata's ~110M entities is not) or a population prior (which 2 dev users can't estimate). The `1/|T_d|` formulation is well-defined and L1-honest at every sample size — a one-like user gets a clean profile rather than a smoothed-toward-uniform one. Revisit when ≥50–100 user profiles enable an empirical-Bayes prior, or if a coarse fixed taxonomy (e.g. YouTube's `videoCategoryId` ~15-bucket vocabulary) becomes the desired output space.
 
-**Why no hard-cap on topic count.** After TF-IDF + L1 the long tail of rarely-relevant topics naturally shrinks to small fractions. `pitch()` reads the dict as-is and makes its own top-N selection at prompt-assembly time. Profile stays honest about the distribution shape.
+**Why no hard-cap on topic count.** After fractional counting + L1 the long tail of rarely-relevant topics naturally shrinks to small fractions. `pitch()` reads the dict as-is and makes its own top-N selection at prompt-assembly time. Profile stays honest about the distribution shape.
 
 ## Provenance and K=5 compression (decided 2026-04-14)
 
@@ -390,7 +394,7 @@ The two L1-normalized windows (`long_term_topic_scores`, `recent_topic_scores`) 
 **Formula:**
 
 ```python
-BLEND_HALF_SATURATION_K = 100.0   # tunable; "W at which recent and long-term weigh equally"
+BLEND_HALF_SATURATION_K = 10      # tunable; "W at which recent and long-term weigh equally"
 
 W = stats["total_recent_weight"]  # unbounded, ≥ 0
 α = W / (W + BLEND_HALF_SATURATION_K)
@@ -656,13 +660,13 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
   - **Template hook stub:** implement `pitch()` with deterministic template hooks (e.g., "You've been subscribed to {channel} since {date}") so the pipeline works end-to-end without an LLM call. Day 3 replaces templates with LLM hooks. Templates remain as fallback if Day 3's LLM integration slips.
   - Integrates with calendar + weather agents to prove protocol works end-to-end via CLI.
 - **Day 2 — extraction pipeline (shared with `alices_agent`).**
-  - Build `agents/youtube/extractor.py` as a pure function: `extract_profile(subs, likes, channel_topics, video_topics, now) -> InterestProfile`. No I/O, no OAuth, no API calls.
-  - Consume committed probe JSON as input. Produce topic-scored `InterestProfile` with both L1-normalized windows + K=5 compressed provenance.
+  - Build `agents/youtube/extractor.py` as a pure function: `extract_profile(subs, likes, channel_qids, video_qids, now, topic_meta=None) -> InterestProfile`. No I/O, no OAuth, no API calls. Canonicalization happens upstream (loaders), not in the extractor.
+  - Consume committed probe JSON as input. Produce topic-scored `InterestProfile` keyed on Wikidata QIDs with both L1-normalized windows, `topic_meta` (QID → label + canonical URL), and K=5 compressed provenance.
   - Topic tagging acquisition: batch `channels.list?part=topicDetails` for subscribed channels + `videos.list?part=topicDetails` for liked videos. Cache both server-side.
   - Per-video topicDetails coverage already validated pre-Day-2 (89.6% on dev's 77 liked videos — see §Topic tagging). No LLM fallback needed.
-  - Normalize Wikipedia URLs → kebab topic tags (strip parenthetical suffixes, `_` → `-`, lowercase).
-  - Apply recency decay to like weights (90-day half-life) before feeding into `tf_recent`.
-  - Compute TF-IDF per window: sublinear TF `log(1 + tf)`, per-window IDF `log((N_window + 1) / df_window)`, L1-normalize each non-empty window.
+  - Canonicalize Wikipedia URLs → Wikidata QIDs via [`agents/youtube/canonicalize.py`](../canonicalize.py); persistent cache at [`topic_cache.json`](../topic_cache.json) handles redirects, synonyms, and disambiguation collisions.
+  - Apply recency decay to like weights (90-day half-life) before feeding into the `1/|T_d|` per-like contribution.
+  - Compute fractional counting per window: `w[T] += weight(d) / |T_d|` for each item `d` (weight 1 for subs, `δ_V` for likes), L1-normalize each non-empty window.
   - Build `topic_provenance` with K=5 per-topic cap (up to 2 oldest subs + up to 3 newest likes, fill continuing in same sort order on the over-supplied side if one side is short).
   - Unit tests lock the extractor contract — future acquisition changes can't drift the profile shape. Fixtures drawn from committed probe JSON.
 - **Day 3 — `pitch()` generation.** Real `pitch()` logic using both profile windows + `AgentMemory`. Priority formula per `agents/docs` Reviewer Concern #1. Replace Day 1's template hooks with LLM-generated hooks constrained by `claim_kind` + `provenance_shape` (see `agents/docs/prompt_design.md` §1–§2). Unit tests for `compute_claim_kind()`, `compute_provenance_shape()`, and `select_segments()` must pass before the LLM prompt step is built (see prompt_design.md §Test mandate).
@@ -674,7 +678,7 @@ Rule: take last path segment, URL-decode, strip parenthetical suffixes `(...)` f
 - `InterestProfile` builds from live YouTube Data API calls (dev's account) with both topic-score windows populated and `topic_provenance` non-empty for each scored topic.
 - Per-channel `topicCategories` coverage ≥ 70% across all 96 subs (probe showed 100% on first 20 — should hold).
 - Per-video `topicDetails` coverage ≥ 70% across dev's 77 liked videos — validated 2026-04-15 at 89.6% (69/77). No LLM fallback required.
-- **TF-IDF shape is sensible:** broad tags (`lifestyle`, `entertainment`) rank lower than genre-specific tags despite higher raw frequency. Spot-check on dev's data: any `lifestyle`-heavy channel's genre-specific co-tags rank above `lifestyle` in the topic dict.
+- **Topic shape is sensible:** broad tags (`Lifestyle` Q32090, `Entertainment` Q173799) get diluted by the `1/|T_d|` length penalty when they co-occur with narrower tags, so genre-specific tags rank competitively against them. Spot-check on dev's data: any `Lifestyle`-heavy channel's genre-specific co-tags rank comparably or above `Lifestyle` in the topic dict.
 - **Temporal comparison is visible:** for at least one topic where recent likes concentrate (e.g., a genre the user has been exploring lately), `recent_topic_scores[T] > long_term_topic_scores[T]`. Inverse holds for a topic with many old subs but no recent likes.
 - **Provenance is LLM-ready:** for any topic `T` with score > 0, `topic_provenance[T]` has 1–5 contributors with fully-populated fields (all required fields present, `kind`-discriminated optional fields correctly set).
 - `pitch()` emits 3–5 valid `Pitch` objects on real data (no mocks) with priority ∈ [0, 1], **or** exactly 1 thin-signal `Pitch` when `combined_topic_scores == {}` per the §`pitch()` flow output contract.
