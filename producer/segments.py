@@ -42,6 +42,30 @@ def _segment_length(pitch: Pitch, overrides: dict[str, int] | None = None) -> in
     return min(raw, MAX_SEGMENT_SEC)
 
 
+def collides(pitch: Pitch, seen_anchors: set[str], seen_source_refs: set[str]) -> bool:
+    """True if pitch shares an anchor or any source_ref with an already-picked pitch.
+
+    Anchor dedup is point-based (one primary id per pitch); source_refs dedup is
+    set-based — two agents pulling from the same corpus can pick different anchors
+    while citing overlapping supporting clips, which is the same narrative twice.
+    """
+    anchor = pitch.get("anchor")
+    if anchor and anchor in seen_anchors:
+        return True
+    for ref in pitch.get("source_refs") or []:
+        if ref in seen_source_refs:
+            return True
+    return False
+
+
+def mark_seen(pitch: Pitch, seen_anchors: set[str], seen_source_refs: set[str]) -> None:
+    anchor = pitch.get("anchor")
+    if anchor:
+        seen_anchors.add(anchor)
+    for ref in pitch.get("source_refs") or []:
+        seen_source_refs.add(ref)
+
+
 def select_guaranteed_slots(
     pitches_by_agent: dict[str, list[Pitch]],
     length_overrides: dict[str, int] | None = None,
@@ -70,6 +94,7 @@ def select_guaranteed_slots(
     guaranteed: list[Pitch] = []
     remaining: list[Pitch] = []
     seen_anchors: set[str] = set()
+    seen_source_refs: set[str] = set()
 
     # Sort agents deterministically so iteration order doesn't depend on dict insertion.
     for agent in sorted(pitches_by_agent):
@@ -77,21 +102,18 @@ def select_guaranteed_slots(
         # Deterministic ordering: highest priority, then title ASC as final tiebreaker.
         ordered = sorted(pitches, key=lambda p: (-p["priority"], p["title"]))
 
-        # Anchor-aware promotion: prefer the highest-priority pitch whose
-        # anchor doesn't collide with an already-selected guaranteed slot.
+        # Collision-aware promotion: prefer the highest-priority pitch whose
+        # anchor and source_refs don't collide with an already-selected slot.
         # If every option collides, fall back to the top-priority pick rather
         # than skip the agent — guaranteed slots are about agent diversity.
         chosen: Pitch = ordered[0]
         for p in ordered:
-            a = p.get("anchor")
-            if a and a in seen_anchors:
+            if collides(p, seen_anchors, seen_source_refs):
                 continue
             chosen = p
             break
 
-        anchor = chosen.get("anchor")
-        if anchor:
-            seen_anchors.add(anchor)
+        mark_seen(chosen, seen_anchors, seen_source_refs)
 
         guaranteed.append(
             {**chosen, "suggested_length_sec": _segment_length(chosen, length_overrides)}
@@ -99,12 +121,11 @@ def select_guaranteed_slots(
         for p in pitches:
             if p is chosen:
                 continue
-            # Drop any pitch whose anchor was already accepted by a
-            # guaranteed slot — its narrative would duplicate a guaranteed
-            # segment. Pitches without an anchor (sub-only topics, weather,
-            # calendar) are never deduped here.
-            a = p.get("anchor")
-            if a and a in seen_anchors:
+            # Drop any pitch that collides with an already-accepted guaranteed
+            # slot (anchor match or any shared source_ref) — its narrative
+            # would duplicate a guaranteed segment. Pitches without an anchor
+            # or source_refs (weather, calendar) are never deduped here.
+            if collides(p, seen_anchors, seen_source_refs):
                 continue
             remaining.append(
                 {**p, "suggested_length_sec": _segment_length(p, length_overrides)}

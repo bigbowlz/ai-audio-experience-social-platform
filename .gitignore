@@ -30,3 +30,9 @@ ydata/**
 !ydata/guest/**
 docs/specs/**
 
+api-storage/**
+
+**/report.*
+**.log
+
+docs/figures/

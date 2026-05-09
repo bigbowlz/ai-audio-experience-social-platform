@@ -30,6 +30,8 @@ from producer.segments import (
     DEFAULT_SEGMENT_SEC,
     MAX_SEGMENT_SEC,
     SEGUE_OVERHEAD_SECS,
+    collides,
+    mark_seen,
 )
 
 _FALLBACK_SEGMENT_SEC = 60
@@ -171,15 +173,15 @@ def _fallback_bonus_selection(
 ) -> list[Pitch]:
     selected: list[Pitch] = []
     seen_anchors: set[str] = set()
+    seen_source_refs: set[str] = set()
     # Decision 5a: deterministic across-agent tiebreaking.
     for pitch in sorted(
         remaining_pitches,
         key=lambda p: (-p["priority"], p["agent"], p["title"]),
     ):
-        # Anchor dedup: skip a bonus pitch whose anchor matches one
+        # Skip a bonus pitch whose anchor or source_refs collide with one
         # already chosen earlier in the bonus pass.
-        anchor = pitch.get("anchor")
-        if anchor and anchor in seen_anchors:
+        if collides(pitch, seen_anchors, seen_source_refs):
             continue
         seg_len = _segment_length(pitch, length_overrides)
         cost = seg_len + segue_overhead_sec
@@ -191,8 +193,7 @@ def _fallback_bonus_selection(
                     "reasoning_summary": f"{pitch['agent']}: {pitch['title']}",
                 }
             )
-            if anchor:
-                seen_anchors.add(anchor)
+            mark_seen(pitch, seen_anchors, seen_source_refs)
             budget -= cost
     return selected
 
@@ -290,6 +291,7 @@ def select_bonus_segments_llm(
     budget = budget_remaining_sec
     bonus_selected: list[Pitch] = []
     seen_anchors: set[str] = set()
+    seen_source_refs: set[str] = set()
     for pick in llm_result["bonus_picks"]:
         pitch = _find_in_remaining(pick["pitch_title"], remaining_pitches)
         if pitch is None:
@@ -297,11 +299,10 @@ def select_bonus_segments_llm(
                 "select_bonus_llm: unknown title %r — skipping", pick["pitch_title"]
             )
             continue
-        anchor = pitch.get("anchor")
-        if anchor and anchor in seen_anchors:
+        if collides(pitch, seen_anchors, seen_source_refs):
             log.info(
-                "select_bonus_llm: dropping %r — anchor %s already used by another bonus pick",
-                pick["pitch_title"], anchor,
+                "select_bonus_llm: dropping %r — anchor/source_refs collide with another bonus pick",
+                pick["pitch_title"],
             )
             continue
         seg_len = _segment_length(pitch, length_overrides)
@@ -314,8 +315,7 @@ def select_bonus_segments_llm(
                     "reasoning_summary": pick["reasoning_summary"],
                 }
             )
-            if anchor:
-                seen_anchors.add(anchor)
+            mark_seen(pitch, seen_anchors, seen_source_refs)
             budget -= cost
 
     return (
