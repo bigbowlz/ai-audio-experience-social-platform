@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -69,16 +70,40 @@ def _list_events(credentials: Any) -> list[dict] | None:
 # ── Credential loading ───────────────────────────────────────────────
 
 
+def _reauth_interactive() -> Any | None:
+    """Re-run the consent flow when the refresh token is revoked/expired.
+
+    Only attempts when stdin is a TTY — silent CLI runs (cron, CI) skip
+    the browser dance and return None so the agent fails soft.
+    """
+    if not sys.stdin.isatty():
+        log.warning(
+            "Calendar refresh token revoked/expired; re-auth needs an interactive "
+            "TTY. Run: python auth/calendar_auth.py"
+        )
+        return None
+    try:
+        TOKEN_PATH.unlink(missing_ok=True)
+        from auth.calendar_auth import run_consent_flow
+        log.warning("Calendar refresh token revoked/expired; launching re-auth flow")
+        return run_consent_flow()
+    except Exception as e:
+        log.warning("Calendar re-auth failed: %s", e)
+        return None
+
+
 def _load_credentials() -> Any | None:
     """Load and refresh OAuth credentials from TOKEN_PATH.
 
     Returns Credentials object or None if token is missing/revoked.
+    On RefreshError (e.g. invalid_grant), retries once via interactive consent.
     """
     if not TOKEN_PATH.exists():
         log.warning("Calendar token not found at %s", TOKEN_PATH)
-        return None
+        return _reauth_interactive()
 
     try:
+        from google.auth.exceptions import RefreshError
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
 
@@ -95,7 +120,11 @@ def _load_credentials() -> Any | None:
         )
 
         if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except RefreshError as e:
+                log.warning("Calendar token refresh rejected: %s", e)
+                return _reauth_interactive()
             data["token"] = creds.token
             data["expiry"] = creds.expiry.isoformat() if creds.expiry else None
             TOKEN_PATH.write_text(json.dumps(data))
