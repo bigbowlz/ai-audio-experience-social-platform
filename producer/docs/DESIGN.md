@@ -38,7 +38,7 @@ class Producer:
         """v0: reads hardcoded list. Returns candidates with handle + price_usdc + wallet."""
 
     def select_external(candidates: list[CreatorAgentListing], brief: Brief) -> CreatorAgentListing:
-        """v0: picks @GoddamnAxl (only listing that matches seed topics)."""
+        """v0: picks @guest(only listing that matches seed topics)."""
 
     def select(pitches_by_agent: dict[str, list[Pitch]], brief: Brief) -> RunningOrder:
         """Picks subset fitting total duration, allocates per-agent airtime, orders.
@@ -491,7 +491,7 @@ Reader — `apply_producer_memory` (pure function):
 | **Default weights**                        | `agent_weights = {}`                                                                   | All priorities unchanged.                                                                                                        |
 | **Single agent boosted**                   | `agent_weights = {"youtube": 1.5}`                                                     | youtube pitches scaled 1.5×; others unchanged.                                                                                   |
 | **Intra-agent order preserved**            | youtube weight 1.5; priorities `[0.9, 0.7, 0.5]`                                       | Post-adjust `[1.35, 1.05, 0.75]`; relative order unchanged, argmax unchanged.                                                    |
-| **Cross-agent bonus reorder**              | youtube weight 1.5, alices weight 1.0; pre: alices pitch 0.7 > youtube pitch 0.5   | Post: youtube 0.75 > alices 0.7 — youtube wins bonus sort.                                                                     |
+| **Cross-agent bonus reorder**              | youtube weight 1.5, alices weight 1.0; pre: alices pitch 0.7 > youtube pitch 0.5       | Post: youtube 0.75 > alices 0.7 — youtube wins bonus sort.                                                                       |
 | **Weight clamped (over MAX)**              | `agent_weights = {"youtube": 5.0}`                                                     | Effective weight = 2.0; priorities scaled 2.0×.                                                                                  |
 | **Weight clamped (under MIN)**             | `agent_weights = {"calendar": 0.01}`                                                   | Effective weight = 0.3.                                                                                                          |
 | **Weight malformed (negative, NaN, None)** | `agent_weights = {"youtube": -0.5}`, `{"weather": float("nan")}`, `{"calendar": None}` | Clamped to `[MIN, MAX]`; NaN/None treated as default 1.0 (no propagation).                                                       |
@@ -501,8 +501,8 @@ Reader — `apply_producer_memory` (pure function):
 
 End-to-end pipeline (the product-visible claim):
 
-| Fixture             | Setup                                                                                                                                                                                                                             | Expected                                                                                                                                                                                                                      |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fixture             | Setup                                                                                                                                                                                                                           | Expected                                                                                                                                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Bonus-slot flip** | 4 agents with 3 pitches each; pre-adjust, alices' #2 pitch would win the last bonus slot over youtube's #2 pitch by priority. With `DISABLE_LLM=1` to force the deterministic fallback, set `agent_weights = {"youtube": 1.5}`. | After `apply_producer_memory → select_guaranteed_slots → select_bonus_segments_llm` (fallback path), the final running order contains youtube's #2 pitch in the bonus slot, not alices' #2. Guaranteed slots are unchanged. |
 
 Writer — learning-loop (fixtures live in learning-loop test suite; design-locked here):
