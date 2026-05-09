@@ -51,7 +51,9 @@ Hooks are NOT spoken on-air; they are input for the Producer.
 1. **Select 3–5 candidates** from the provided list. Each pitch must stay \
    coherent around its own topic — the hook stays on that topic and does \
    not drift into the others you selected. Across the selected set, prefer \
-   variety over clustering similar topics. You may reorder by narrative flow.
+   topical diversity over clustering: covering different domains is more \
+   valuable than two takes on the same domain. You may reorder by \
+   narrative flow.
 2. **Assign priority ∈ [0, 1]** to each selected topic. Higher = more \
    important. Use the algo `score` as a baseline but adjust for narrative \
    interest and variety.
@@ -116,7 +118,8 @@ Hooks are NOT spoken on-air; they are input for the Producer.
 1. **Select 3–5 candidates** from the provided list. Each pitch must stay \
    coherent around its own topic — the hook stays on that topic and does \
    not drift into the others you selected. Across the selected set, prefer \
-   variety over clustering similar topics.
+   topical diversity over clustering: covering different domains is more \
+   valuable than two takes on the same domain.
 2. **Assign priority ∈ [0, 1]** per selected topic. Use algo `score` as \
    baseline, adjust for narrative variety.
 3. **External-curator framing is mandatory.** Every hook must make it \
