@@ -55,21 +55,26 @@ def _fetch_user_profile(access_token: str) -> dict:
         return {}
 
 
-def main() -> None:
-    client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET") or (
+def _resolve_client_secret() -> str | None:
+    return os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET") or (
         str(_DEFAULT_CREDENTIALS) if _DEFAULT_CREDENTIALS.exists() else None
     )
-    if not client_secret:
+
+
+def run_consent_flow() -> object | None:
+    """Run the OAuth consent flow, persist token + profile, return creds.
+
+    Returns None if no client secret is configured. Raises on flow failure.
+    Callable from the agent to re-auth after a revoked/expired refresh token.
+    """
+    client_secret = _resolve_client_secret()
+    if not client_secret or not Path(client_secret).exists():
         print(
-            "Set GOOGLE_OAUTH_CLIENT_SECRET to the path of your OAuth client_secret JSON.\n"
+            "Set GOOGLE_OAUTH_CLIENT_SECRET to your OAuth client_secret JSON.\n"
             "  export GOOGLE_OAUTH_CLIENT_SECRET=/path/to/client_secret.json\n"
             "  python auth/calendar_auth.py"
         )
-        sys.exit(1)
-
-    if not Path(client_secret).exists():
-        print(f"Client secret file not found: {client_secret}")
-        sys.exit(1)
+        return None
 
     flow = InstalledAppFlow.from_client_secrets_file(client_secret, SCOPES)
     creds = flow.run_local_server(port=0)
@@ -94,6 +99,12 @@ def main() -> None:
     }
     USER_PROFILE_PATH.write_text(json.dumps(profile, indent=2))
     print(f"Profile saved to {USER_PROFILE_PATH} (first_name={profile['first_name']!r})")
+    return creds
+
+
+def main() -> None:
+    if run_consent_flow() is None:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
