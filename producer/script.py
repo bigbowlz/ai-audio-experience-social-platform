@@ -559,7 +559,7 @@ async def generate_segment(
             {
                 "type": "web_search_20250305",
                 "name": "web_search",
-                "max_uses": 2,
+                "max_uses": 3,
             }
         ],
         timeout=40.0,
@@ -818,16 +818,22 @@ def build_segment_payload(
     topic-specific segue rather than falling back to generic connectors.
     """
     wpm = words_per_min()
+    seg_payload: dict = {
+        "agent": segment["agent"],
+        "title": segment["title"],
+        "hook": segment["hook"],
+        "source_refs": segment.get("source_refs", []),
+        "data": segment.get("data", {}),
+        "thin_signal": segment.get("thin_signal", False),
+    }
+    # claim_kind is a listener-taste constraint; external pitches reflect a
+    # curator, not the listener, so the producer doesn't need it (and would
+    # otherwise have to be told to ignore it). Only youtube segments carry
+    # it through to the producer LLM.
+    if segment["agent"] == "youtube":
+        seg_payload["claim_kind"] = segment.get("claim_kind", "neutral")
     payload: dict = {
-        "segment": {
-            "agent": segment["agent"],
-            "title": segment["title"],
-            "hook": segment["hook"],
-            "source_refs": segment.get("source_refs", []),
-            "data": segment.get("data", {}),
-            "claim_kind": segment.get("claim_kind", "neutral"),
-            "thin_signal": segment.get("thin_signal", False),
-        },
+        "segment": seg_payload,
         "today_context": dict(brief["today_context"]),
         "is_first": is_first,
         "target_words": _target_words(segment["suggested_length_sec"], wpm),
